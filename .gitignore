@@ -1,0 +1,3 @@
+.skai-agent/
+node_modules/
+*.log

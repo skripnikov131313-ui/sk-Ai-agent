@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "status": { "type": "string", "enum": ["completed", "blocked", "failed"] },
+    "summary": { "type": "string" },
+    "checks": { "type": "array", "items": { "type": "string" } },
+    "filesChanged": { "type": "array", "items": { "type": "string" } },
+    "blockers": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["status", "summary", "checks", "filesChanged", "blockers"],
+  "additionalProperties": false
+}

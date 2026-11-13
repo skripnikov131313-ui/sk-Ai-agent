@@ -30,4 +30,3 @@ Launcher ищет Node.js в PATH или в установленном паке�
 - Доступ Codex ограничен `workspace-write` репозитория.
 - UI чата, Cloud API и автосинхронизация с мобильным устройством не реализованы.
 - В текущем smoke-test второй Codex-процесс сообщил `registered Core launch requires an installed app`; он не прочитал тестовый файл. Смотрите `docs/FEASIBILITY.md`.
-
