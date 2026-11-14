@@ -1,0 +1,48 @@
+name: Agent checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.22.1'
+      - name: Unit and protocol integration tests (no model calls)
+        shell: pwsh
+        run: |
+          $tests = @(Get-ChildItem test -Filter '*.test.mjs' | ForEach-Object { $_.FullName })
+          if ($tests.Count -eq 0) { throw 'No tests found' }
+          New-Item -ItemType Directory -Force .skai-agent/ci | Out-Null
+          & node --test --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=.skai-agent/ci/results.xml @tests
+          exit $LASTEXITCODE
+      - name: CLI smoke
+        shell: pwsh
+        run: |
+          & node src/cli.mjs doctor
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & node src/cli.mjs list
+          exit $LASTEXITCODE
+      - name: Test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agent-tests-${{ matrix.os }}
+          path: .skai-agent/ci/results.xml
+          if-no-files-found: error
+          retention-days: 7

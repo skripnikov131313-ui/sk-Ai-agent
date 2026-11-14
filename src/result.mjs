@@ -4,8 +4,11 @@ export function classifyResult(exitCode, timedOut, rawMessage) {
   try {
     const report = JSON.parse(rawMessage);
     if (!['completed', 'blocked', 'failed'].includes(report.status)) throw new Error('unknown task status');
-    if (typeof report.summary !== 'string' || !Array.isArray(report.checks) ||
-        !Array.isArray(report.filesChanged) || !Array.isArray(report.blockers)) {
+    const fields = ['status', 'summary', 'checks', 'filesChanged', 'blockers'];
+    if (typeof report.summary !== 'string' ||
+        Object.keys(report).some(key => !fields.includes(key)) ||
+        !['checks', 'filesChanged', 'blockers'].every(key =>
+          Array.isArray(report[key]) && report[key].every(item => typeof item === 'string'))) {
       throw new Error('invalid report shape');
     }
     return { status: report.status, report, error: report.status === 'failed' ? report.summary : undefined };
