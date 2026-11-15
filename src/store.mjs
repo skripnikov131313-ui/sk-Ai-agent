@@ -14,7 +14,7 @@ export function isAlive(pid) {
   catch (error) { return error.code !== 'ESRCH'; }
 }
 
-async function transaction(file, change) {
+export async function transaction(file, change) {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const lockFile = `${file}.lock`;
   const lock = await acquireStoreLock(lockFile);
@@ -67,7 +67,7 @@ export async function writeTasks(db, file = TASKS_FILE) {
   } finally { await rm(temp, { force: true }); }
 }
 
-export async function addTask(goal, dbFile = TASKS_FILE) {
+export function newTask(goal) {
   const normalized = String(goal ?? '').trim();
   if (normalized.length < 5 || normalized.length > 4000) {
     throw new Error('Задача должна содержать от 5 до 4000 символов.');
@@ -77,6 +77,11 @@ export async function addTask(goal, dbFile = TASKS_FILE) {
     id: randomUUID(), goal: normalized, status: 'queued', createdAt: now,
     updatedAt: now, attempts: 0, sessionId: null, lastExitCode: null,
   };
+  return task;
+}
+
+export async function addTask(goal, dbFile = TASKS_FILE) {
+  const task = newTask(goal);
   return transaction(dbFile, db => { db.tasks.push(task); return task; });
 }
 

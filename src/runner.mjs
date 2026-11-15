@@ -36,7 +36,7 @@ export async function recoverTask(id, dbFile = TASKS_FILE) {
 
 export async function executeTask(id, isResume = false, {
   root = ROOT, dataDir = DATA_DIR, dbFile = TASKS_FILE,
-  command, prefixArgs = [], timeoutMs = 600_000, graceMs = 500, handleSignals = false,
+  command, prefixArgs = [], timeoutMs = 600_000, graceMs = 500, handleSignals = false, signal,
 } = {}) {
   if (!UUID.test(id || '')) throw new Error('Ожидается UUID задачи из команды list.');
   const runToken = randomUUID();
@@ -103,7 +103,7 @@ export async function executeTask(id, isResume = false, {
     if (!command || /\.(cmd|bat)$/i.test(command)) throw new Error('Native Codex CLI не найден. Проверьте doctor или задайте SKAI_CODEX_EXE; shell-launcher не запускается автоматически.');
     const prompt = `Выполни задачу в корне этого репозитория. Не устанавливай системное ПО, не публикуй данные, не используй секреты и не выходи за пределы репозитория. Выполни необходимые проверки. При блокировке верни status=blocked с причиной. Финал — JSON по переданной схеме. Не включай секреты в отчёт.\n${isResume ? 'Продолжай с сохранённого состояния, не повторяй уже выполненную работу.\n' : ''}Задача:\n${task.goal}\n`;
     const result = await runProcess(command, [...prefixArgs, ...codexArgs(root, outputFile, isResume ? sessionId : null)], {
-      cwd: root, input: prompt, timeoutMs, graceMs, handleSignals,
+      cwd: root, input: prompt, timeoutMs, graceMs, handleSignals, signal,
       onStdout: consume, onSpawn: pid => checkpoint({ childPid: pid }),
     });
     if (carry.trim() && !dropping) await parseLine(carry);

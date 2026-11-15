@@ -5,8 +5,9 @@ import { spawn } from 'node:child_process';
 // Injection of a command is only an internal testing seam.
 export async function runProcess(command, args, {
   cwd, input = '', timeoutMs = 600_000, graceMs = 500,
-  onStdout, onSpawn, handleSignals = false, inheritStdio = false,
+  onStdout, onSpawn, handleSignals = false, inheritStdio = false, signal,
 } = {}) {
+  if (signal?.aborted) return { code: 130, stdout: '', stderr: '', reason: 'signal' };
   const grouped = process.platform !== 'win32' && !inheritStdio;
   const child = spawn(command, args, {
     cwd, windowsHide: !inheritStdio, detached: grouped,
@@ -52,6 +53,8 @@ export async function runProcess(command, args, {
     process.on('SIGINT', onInterrupt);
     process.on('SIGTERM', onInterrupt);
   }
+  signal?.addEventListener('abort', onInterrupt, { once: true });
+  if (signal?.aborted) onInterrupt();
   const timer = setTimeout(() => stop('timeout'), timeoutMs);
   const consume = async (stream, callback) => {
     if (!stream) return;
@@ -75,6 +78,7 @@ export async function runProcess(command, args, {
     return { code: error ? 127 : code, stdout, stderr, reason, error, pid: child.pid };
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', onInterrupt);
     if (process.platform !== 'win32') killGroup('SIGKILL');
     if (handleSignals) {
       process.off('SIGINT', onInterrupt);
