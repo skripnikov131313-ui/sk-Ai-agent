@@ -41,3 +41,10 @@
 - При первом CI эти проверки обнаружили проблемы в обработке bootstrap-ошибок и изоляции fixture-папок: cmd в CI использовал системный ProgramFiles вместо переданного через env. Error paths вынесены из вложенных блоков, bootstrap-ошибки возвращают 1, PATH ищется напрямую без subprocess. Test driver задаёт каталоги внутри своего cmd до CALL неизменённого launcher.
 - [CI 43710790251](https://github.com/skripnikov131313-ui/sk-Ai-agent/actions/runs/43710790251) для `85b9b1b`: Linux и Windows — Success; GitHub показывает оба JUnit artifact. Семь launcher-проверок исполняются на Windows, в Linux остаются skipped. На ноутбуке пользователя обновлённый doctor ещё не подтверждён.
 - В CI добавлены bounded JUnit summary и failure annotations: подробности synthetic test failures видны через обычную страницу GitHub при недоступном API. Исходные команды сохраняют свои exit codes; assertions не отключались.
+
+## Windows prerequisites — Node доступен, следующий шаг Codex CLI
+
+- Пользователь установил Node.js и повторил doctor на своём Windows ПК. Подтверждены Node `v26.13.1`, обнаружение Git и исполнение launcher/Node CLI. Полный test suite на этом ПК ещё не запускался.
+- Doctor не обнаружил Codex в PATH, авторизация пока `not confirmed`; это prerequisite реального worker, а не подтверждённая ошибка login или отсутствие подписки. `gh/cmake/dotnet` для текущей проверки не требуются.
+- Проверен WinGet manifest `OpenAI.Codex` версии `0.168.0`: x64 native exe с portable alias `codex`, sandbox helper-файлы, официальный OpenAI GitHub Release и SHA-256. В README добавлен поддерживаемый маршрут установки и проверки существующей авторизации до повторного входа.
+- Установка/вход на ПК пользователя пока не выполнялись через этот Cloud-чат. Ожидается локальная установка пакета и повторный doctor; секреты/API-ключи в чат не запрашиваются.

@@ -2,6 +2,27 @@
 
 Локальный ограниченный исполнитель задач на базе уже авторизованного Codex CLI. Для длительной работы с телефона и при выключенном ноутбуке основной маршрут — **Codex Cloud**, после публикации Cloud environment с репозиториями. Этот Agent не создаёт второй LLM runtime или API-биллинг.
 
+## Требования к Windows worker
+
+Нужны Git, Node.js 24+ и официальный native Codex CLI в PATH. Doctor может работать до установки Codex: `tools.codex: null` и `codexLaunch: not found` означают, что запуск задач пока недоступен. `gh`, `cmake` и `dotnet` для текущего worker необязательны.
+
+После установки Git и Node добавьте Codex CLI вручную:
+
+```powershell
+winget install --id OpenAI.Codex --exact --source winget
+```
+
+Откройте новое окно PowerShell и проверьте:
+
+```powershell
+codex.exe --version
+codex.exe login status
+```
+
+Если вход не подтверждён, выполните `codex.exe login` и войдите через ChatGPT в открывшемся браузере. Затем повторите `.\agent.cmd doctor` из корня проекта. Для этого сценария используется авторизация Codex/ChatGPT; API-ключ в проект не добавляется.
+
+Пакет [OpenAI.Codex в WinGet](https://github.com/microsoft/winget-pkgs/blob/master/manifests/o/OpenAI/Codex/0.168.0/OpenAI.Codex.installer.yaml) поставляет native executable из официального GitHub Release OpenAI, alias `codex` и Windows sandbox helpers; манифест закрепляет SHA-256 архива. Это совместимый с worker способ установки без запуска PowerShell script shims. Инсталлятор может устанавливать объявленные зависимости пакета; launcher сам ничего не устанавливает.
+
 ## Локальная проверка
 
 Если Node.js доступен в PATH:
