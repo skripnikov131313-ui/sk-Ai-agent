@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DATA_DIR, readTasks, updateTask } from '../src/store.mjs';
 import { parsePlan, work } from '../src/work.mjs';
+import { parseWorkOptions } from '../src/work-options.mjs';
 
 const fixture = fileURLToPath(new URL('./fixtures/work-codex.mjs', import.meta.url));
 
@@ -36,6 +37,24 @@ test('one work launch executes successive checklist items and a restart does not
   assert.equal((await work(options)).exitCode, 0);
   assert.equal((await invocations(options.root)).length, 3);
   assert.equal((await readTasks(options.dbFile)).controller.pid, null);
+});
+
+test('the default processes the entire original plan without an eight-item cap or deadline', async t => {
+  const options = await setup(t, Array.from({ length: 10 }, (_, index) => `step-${index}`));
+  delete options.budgetMs;
+  const result = await work(options);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.tasks.length, 10);
+  assert.equal((await invocations(options.root)).length, 10);
+  assert.equal((await readTasks(options.dbFile)).controller.deadlineAt, null);
+});
+
+test('CLI limits are optional and an explicit budget can exceed four hours', () => {
+  assert.equal(parseWorkOptions([]).budgetMs, null);
+  assert.equal(parseWorkOptions([]).maxTasks, 100);
+  assert.equal(parseWorkOptions(['--minutes', '1440']).budgetMs, 86_400_000);
+  assert.equal(parseWorkOptions(['PLAN.md', '--max-tasks', '2']).maxTasks, 2);
+  for (const value of ['0', '-1', 'Infinity', '1.2', 'NaN']) assert.throws(() => parseWorkOptions(['--minutes', value]), /--minutes/);
 });
 
 test('an unverified success is resumed automatically before advancing', async t => {
@@ -179,7 +198,7 @@ test('plan parsing preserves identity when checked, ignores fenced examples, and
   assert.throws(() => parsePlan('# Plan\n- [ ] Same\n- [x] Same'), /неоднозначны/);
 });
 
-test('unsafe plan paths and unbounded work limits are rejected before any worker starts', async t => {
+test('unsafe plan paths and invalid limits are rejected before any worker starts', async t => {
   const options = await setup(t, ['first']);
   await assert.rejects(() => work({ ...options, source: '../outside.md' }), /внутри проекта/);
   await assert.rejects(() => work({ ...options, budgetMs: Infinity }), /Лимиты/);

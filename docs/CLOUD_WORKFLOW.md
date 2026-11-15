@@ -23,6 +23,8 @@
 
 ## Подтверждённый CI и оставшаяся приёмка
 
+`work-start` теперь запускает отдельный процесс, который продолжает исходный план без общего таймера и открытого терминала. `work-stop` останавливает его с сохранением состояния. Остановка самой managed-машины остаётся границей; проверка завершения launcher не доказывает работу после приостановки Cloud. Официальный Cloud CLI пока блокируется прокси на chatgpt.com (CONNECT 403). Домен сохранён в сетевом черновике, но requires_publish=true: действующий доступ ещё не изменился. После применения настроек нужны новый запрос и реальная проверка executor.
+
 `.github/workflows/check.yml`: Node.js закреплён, Linux + Windows, тесты без вызовов модели, JUnit artifact, только `contents: read`, без ключей OpenAI и без deployment. Actions закреплены на SHA, сверенных с официальными Git-репозиториями.
 
 После разрешения пользователя ветка `cloud/agent-reliability` отправлена в GitHub. Удалённый SHA совпадает с локальным `451e0c5017f2b1eb90ce5af46b7d5c0f062c781f`. [Запуск 43706317987](https://github.com/skripnikov131313-ui/sk-Ai-agent/actions/runs/43706317987) имеет общий результат Success. Успешны [Linux job](https://github.com/skripnikov131313-ui/sk-Ai-agent/actions/runs/43706317987/job/132788064986) и [Windows job](https://github.com/skripnikov131313-ui/sk-Ai-agent/actions/runs/43706317987/job/132788064685). Overview показывает артефакты `agent-tests-ubuntu-24.04` и `agent-tests-windows-2022`; retention — 7 дней. Приватные logs и содержимое артефактов не скачивались: страница требует входа, а запрос к `api.github.com` отклоняется сетевой политикой среды. Успех заданий подтверждён по страницам GitHub, а не по наличию YAML.

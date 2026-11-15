@@ -6,13 +6,17 @@ import { safeStatus } from './privacy.mjs';
 import { smoke } from './smoke.mjs';
 import { localSession } from './local.mjs';
 import { work, WORK_DB } from './work.mjs';
+import { parseWorkOptions } from './work-options.mjs';
+import { backgroundStatus, startBackground, stopBackground, recoverBackground } from './background.mjs';
 
 const HELP = `Sk/Ai Agent — ограниченный исполнитель (MVP)
 
 Из корня репозитория:
   node src/cli.mjs doctor
   node src/cli.mjs local
-  node src/cli.mjs work [план.md] [--minutes 60] [--retry-blocked]
+  node src/cli.mjs work [план.md] [--minutes N] [--max-tasks N] [--retry-blocked]
+  node src/cli.mjs work-start [те же параметры]
+  node src/cli.mjs work-stop
   node src/cli.mjs work-status
   node src/cli.mjs work-recover
   node src/cli.mjs smoke
@@ -26,25 +30,21 @@ const HELP = `Sk/Ai Agent — ограниченный исполнитель (M
 
 Каждая попытка: workspace-write в корне проекта, до 10 минут.
 Не более трёх попыток на задачу. work сам переходит между пунктами плана;
-до 8 пунктов и 60 минут по умолчанию. run/resume остаются отдельными командами.
+весь исходный план без общего таймера по умолчанию. work-start запускает отдельный процесс.
+run/resume остаются отдельными командами.
 Ctrl+C останавливает worker и дочерние процессы. Cloud-сессия имеет собственные лимиты.`;
 
 async function main([command, ...args]) {
-  if (command === 'work') {
-    let source = 'TASKS.md';
-    let minutes = 60;
-    let retryBlocked = false;
-    let hasSource = false;
-    for (let i = 0; i < args.length; i++) {
-      if (args[i] === '--minutes') {
-        minutes = Number(args[++i]);
-        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 240) throw new Error('--minutes: целое число от 1 до 240.');
-      } else if (args[i] === '--retry-blocked') retryBlocked = true;
-      else if (!args[i].startsWith('-') && !hasSource) { source = args[i]; hasSource = true; }
-      else throw new Error(`Неизвестный аргумент work: ${args[i]}`);
+  if (command === 'work' || command === 'work-start') {
+    const options = parseWorkOptions(args);
+    console.log(safeStatus(`Работа по ${options.source}: ${options.budgetMs === null ? 'без общего таймера' : `до ${options.budgetMs / 60_000} минут`}, ${options.maxTasks === 100 ? 'весь исходный план' : `до ${options.maxTasks} пунктов`}, до 3 попыток на пункт.`));
+    if (command === 'work-start') {
+      const state = await startBackground(options);
+      console.log(safeStatus(`Фоновый процесс ${state.status}. PID: ${state.pid}. Журнал: ${state.logFile}\nСостояние: work-status; остановка: work-stop.${state.reason ? `\n${state.reason}` : ''}`));
+      process.exitCode = ['running', 'completed', 'paused'].includes(state.status) ? 0 : state.exitCode ?? 1;
+      return;
     }
-    console.log(`Работа по ${source}: до ${minutes} минут, до 8 независимых пунктов, до 3 попыток на пункт. Ctrl+C — остановка.`);
-    const result = await work({ source, budgetMs: minutes * 60_000, retryBlocked, handleSignals: true,
+    const result = await work({ ...options, handleSignals: true,
       onProgress: event => console.log(safeStatus(`${event.type}: ${event.text}${event.attempt ? ` (попытка ${event.attempt})` : ''}${event.error ? ` — ${event.error}` : ''}`)),
     });
     console.log(`${result.status}: ${result.reason}\nПрогресс: ${path.relative(ROOT, WORK_DB)}; команда work-status.`);
@@ -53,18 +53,19 @@ async function main([command, ...args]) {
   }
   if (command === 'work-status') {
     const db = await readTasks(WORK_DB);
-    console.log(safeStatus(JSON.stringify({ controller: db.controller ?? null, tasks: db.tasks.map(task => ({
+    console.log(safeStatus(JSON.stringify({ service: await backgroundStatus(), controller: db.controller ?? null, tasks: db.tasks.map(task => ({
       id: task.id, status: task.status, attempts: task.attempts, text: task.work?.text,
       verified: task.work?.verified, error: task.error, checks: task.report?.checks,
     })) }, null, 2)));
     return;
   }
+  if (command === 'work-stop') {
+    const state = await stopBackground();
+    console.log(safeStatus(state ? `${state.status}: ${state.reason ?? 'Фоновый процесс завершён.'}` : 'Фонового процесса нет.'));
+    return;
+  }
   if (command === 'work-recover') {
-    await recoverStore(`${WORK_DB}.work`);
-    await recoverStore(WORK_DB);
-    for (const task of (await readTasks(WORK_DB)).tasks) {
-      if (task.status === 'running') await recoverTask(task.id, WORK_DB);
-    }
+    await recoverBackground();
     console.log('Остановленные процессы восстановлены. Следующий work продолжит сохранённые сессии.');
     return;
   }

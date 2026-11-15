@@ -71,15 +71,15 @@ function acceptance(task, item, source) {
 
 export async function work({
   root = ROOT, dataDir = path.join(DATA_DIR, 'work'), dbFile = WORK_DB,
-  source = 'TASKS.md', budgetMs = 3_600_000, taskTimeoutMs = 600_000,
-  maxTasks = 8, maxAttempts = MAX_ATTEMPTS, retryBlocked = false, command, prefixArgs = [], graceMs = 500,
-  handleSignals = false, signal, onProgress = () => {},
+  source = 'TASKS.md', budgetMs = null, taskTimeoutMs = 600_000,
+  maxTasks = 100, maxAttempts = MAX_ATTEMPTS, retryBlocked = false, command, prefixArgs = [], graceMs = 500,
+  handleSignals = false, signal, onProgress = () => {}, onReady = () => {},
 } = {}) {
-  if (!Number.isSafeInteger(budgetMs) || budgetMs < 1 || budgetMs > 14_400_000 ||
+  if ((budgetMs !== null && (!Number.isSafeInteger(budgetMs) || budgetMs < 1 || Date.now() + budgetMs > 8_640_000_000_000_000)) ||
       !Number.isSafeInteger(taskTimeoutMs) || taskTimeoutMs < 1 || taskTimeoutMs > 600_000 ||
-      !Number.isSafeInteger(maxTasks) || maxTasks < 1 || maxTasks > 12 ||
+      !Number.isSafeInteger(maxTasks) || maxTasks < 1 || maxTasks > 100 ||
       !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > MAX_ATTEMPTS) {
-    throw new Error('Лимиты work: до 4 часов, 10 минут на попытку, 12 пунктов и 3 попыток.');
+    throw new Error('Лимиты work: положительный бюджет либо null, до 10 минут на попытку, до 100 пунктов и 3 попыток.');
   }
   root = await realpath(root);
   source = path.relative(root, path.resolve(root, source));
@@ -95,7 +95,7 @@ export async function work({
   if (handleSignals) { process.on('SIGINT', interrupt); process.on('SIGTERM', interrupt); }
   signal?.addEventListener('abort', interrupt, { once: true });
   if (signal?.aborted) interrupt();
-  const deadline = Date.now() + budgetMs;
+  const deadline = budgetMs === null ? null : Date.now() + budgetMs;
   let ids = [];
   const saveController = patch => transaction(dbFile, db => {
     db.controller = { ...db.controller, ...patch, updatedAt: new Date().toISOString() };
@@ -129,12 +129,13 @@ export async function work({
         if (runnable >= maxTasks) break;
       }
       db.controller = { status: 'running', pid: process.pid, host: os.hostname(), source,
-        startedAt: new Date().toISOString(), deadlineAt: new Date(deadline).toISOString(),
+        startedAt: new Date().toISOString(), deadlineAt: deadline === null ? null : new Date(deadline).toISOString(),
         taskIds: selected, deferredCount: plan.filter(item => !item.checked &&
           !db.tasks.some(task => task.work?.source === source && task.work.key === item.key &&
           (selected.includes(task.id) || ['completed', 'skipped'].includes(task.status)))).length, reason: null };
       return selected;
     });
+    await onReady();
     for (const id of ids) {
       let task = (await readTasks(dbFile)).tasks.find(task => task.id === id);
       // A real blocker is recorded once. It cannot consume every new launch.
@@ -142,7 +143,7 @@ export async function work({
       if (task.status === 'running') return await finish('blocked', 2, 'Остался running worker: сначала подтвердите его остановку через work-recover.');
       while (true) {
         if (controller.signal.aborted) return await finish('interrupted', 130, 'Остановлено пользователем.');
-        if (Date.now() >= deadline) return await finish('interrupted', 124, 'Достигнут общий лимит времени; прогресс сохранён.');
+        if (deadline !== null && Date.now() >= deadline) return await finish('interrupted', 124, 'Достигнут общий лимит времени; прогресс сохранён.');
         const current = (await loadPlan(root, source)).find(item => item.key === task.work.key);
         if (!current) {
           task = await updateTask(id, { status: 'blocked', error: 'Пункт плана удалён или изменён во время работы.' }, dbFile);
@@ -158,7 +159,7 @@ export async function work({
             (task.status === 'blocked' && retryBlocked)))) break;
         await onProgress({ type: 'starting', taskId: id, text: task.work.text, attempt: task.attempts + 1 });
         const result = await executeTask(id, resume, { root, dataDir, dbFile, command, prefixArgs,
-          graceMs, signal: controller.signal, timeoutMs: Math.max(1, Math.min(taskTimeoutMs, deadline - Date.now())) });
+          graceMs, signal: controller.signal, timeoutMs: deadline === null ? taskTimeoutMs : Math.max(1, Math.min(taskTimeoutMs, deadline - Date.now())) });
         task = result.task;
         if (controller.signal.aborted || result.exitCode === 130) return await finish('interrupted', 130, 'Остановлено пользователем.');
         if (task.status === 'failed' && task.report?.blockers.length) {
