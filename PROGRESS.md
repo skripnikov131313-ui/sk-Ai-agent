@@ -21,3 +21,12 @@
 - Протокольные проверки используют имитатор, не вызывают модель и не доказывают реальный Codex sandbox. Настоящее изменение файла вложенным Codex, Windows/mobile acceptance и квоты остаются открытыми.
 - Проверки текущей Linux-машины: 27/27 Node tests прошли, свежий JUnit содержит те же 27 testcase без failures/errors; CLI doctor/list/help и синтаксис YAML workflow проверены. В Browser 4/4 существующих теста прошли, его исходники не изменялись.
 - Следующий внешний шаг: разрешённая отправка отдельной ветки для реального Windows CI. Полный Agent и native Browser завершёнными не объявляются.
+
+## GitHub Actions — первый подтверждённый Windows/Linux запуск
+
+- Пользователь разрешил продолжение, отправку ветки и CI. После восстановления той же среды коммит `451e0c5` обнаружен, рабочий каталог чист.
+- `cloud/agent-reliability` успешно отправлена в `skripnikov131313-ui/sk-Ai-agent`; удалённый SHA совпадает с `451e0c5017f2b1eb90ce5af46b7d5c0f062c781f`. Main не изменялся.
+- [Actions run 43706317987](https://github.com/skripnikov131313-ui/sk-Ai-agent/actions/runs/43706317987): Success, оба задания completed successfully. Linux job `132788064986`, Windows job `132788064685`; GitHub показывает оба JUnit artifact.
+- Нативный Windows taskkill-путь теперь исполнен CI с имитатором CLI. Настоящий Codex, его sandbox и GUI этим не проверяются.
+- Сетевой запрос к `api.github.com` получил CONNECT 403. Чтение доступных страниц GitHub подтвердило результат, private logs требуют входа; никакие credentials не выводились, сетевые настройки не менялись.
+- Остаются внешние prerequisites: доступный авторизованный Windows-компьютер для реального worker, проверка мобильного клиента и данных о квотах аккаунта. Изменения и CI не выдаются за завершённый native Browser.
