@@ -16,6 +16,12 @@ Codex Cloud запускает кодовые задачи на управляе
 
 Отдельный blocker: вложенный `codex exec` запустился, но сообщил, что локальная команда не может быть запущена (`registered Core launch requires an installed app`). Smoke task поэтому имеет результат `blocked`; нельзя считать executor готовым.
 
+## Подтверждённый Windows запуск — 2026-11-15
+
+Для текущей установки через WinGet native Codex CLI `0.168.0` успешно найден по полному package-пути и использует существующий ChatGPT login. На Node.js `26.13.1` пользователь запустил актуальный Agent из ветки `cloud/agent-reliability`; его `smoke` вернул PASS / completed с независимой проверкой созданного файла. Идентификатор задачи: `0b7edf0d-5920-4d51-8a17-f4f0c80b6567`.
+
+Ранний Desktop/Core запуск выше остаётся исторической неудачной попыткой. Текущий маршрут WinGet/native CLI подтвердил положительную файловую операцию. Реальное interrupt/resume, отрицательная проверка sandbox, мобильное продолжение и доступные квоты требуют отдельных результатов.
+
 ## Источники
 
 - [OpenAI Help: Using Codex Cloud](https://help.openai.com/en/articles/20001545-using-codex-cloud)

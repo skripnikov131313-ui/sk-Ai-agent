@@ -56,3 +56,11 @@
 - Doctor и Runner используют общий поиск native CLI: explicit `SKAI_CODEX_EXE`, PATH, WinGet Links и ограниченные OpenAI.Codex_* package directories. Несколько unaliased packages требуют явного выбора; helper-файлы не исполняются как CLI.
 - Добавлена команда `smoke`: одна задача Codex с workspace-write и существующим лимитом 10 минут создаёт свежий marker-файл внутри игнорируемого каталога проекта. Собственный verifier проверяет обычный файл и точное содержимое, отличая model completed от пройденной приёмки. Реальный запуск на ПК пользователя ещё ожидается.
 - Локальные автоматические проверки: 47 tests, 40 passed, 7 Windows-only skipped, без failed. Новые проверки обнаружения и smoke используют filesystem/protocol fixtures; вызова модели не было.
+
+## 2026-11-15 — реальный Windows smoke PASS
+
+- Пользователь обновил локальную ветку до `7337908`, выполнил `doctor` и `smoke` на своём Windows x64 компьютере. Node.js `26.13.1`, native Codex CLI `0.168.0` найден в WinGet package directory, `codexAuthentication: available`, `codexLaunch: native`.
+- Получен фактический вывод: `Smoke PASS. Задача: 0b7edf0d-5920-4d51-8a17-f4f0c80b6567. Статус: completed.` По реализации smoke это означает, что worker проверил обычный свежий файл и точный случайный marker после реального исполнения Codex.
+- Источник этой Windows-проверки — вывод PowerShell, присланный пользователем. Доступ Cloud к ноутбуку не предоставлялся. API-ключи/значения credentials не запрашивались и не публиковались.
+- [CI 43714755887](https://github.com/skripnikov131313-ui/sk-Ai-agent/actions/runs/43714755887) для `7337908` успешно прошёл на Linux и Windows. Это отдельные автоматические проверки с fixtures.
+- Запрошены чтение сохранённой задачи через `show` и полный test suite на пользовательском Node.js 26. Отдельно остаются реальный interrupt/resume, отрицательные sandbox-проверки, mobile/offline продолжение и фактические квоты. Эти пункты одним Smoke PASS не закрываются.
