@@ -41,6 +41,7 @@ exit /b 9009
 "%NODE_EXE%" -e "process.exit(Number(process.versions.node.split('.')[0]) >= 24 ? 0 : 1)" >nul 2>nul
 if errorlevel 1 (
   echo Node.js 24 or newer is required. The selected runtime could not pass this check.
+  echo Selected runtime: "%NODE_EXE%"
   echo Install Node.js LTS or set SKAI_NODE_EXE to a compatible node.exe.
   exit /b 1
 )

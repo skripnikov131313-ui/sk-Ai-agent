@@ -90,7 +90,7 @@ test('launcher honors an explicit runtime path containing spaces and ampersand',
 test('missing Node produces installation guidance without attempting installation', windows, async t => {
   const { invoke } = await setup(t);
   const result = await invoke();
-  assert.equal(result.code, 9009);
+  assert.equal(result.code, 9009, result.stdout + result.stderr);
   assert.match(result.stdout, /Node.js was not found/);
   assert.match(result.stdout, /winget install --id OpenJS.NodeJS.LTS/);
   assert.match(result.stdout, /SKAI_NODE_EXE/);
@@ -100,7 +100,7 @@ test('invalid explicit runtime fails clearly instead of silently choosing anothe
   const { root, env, invoke } = await setup(t);
   env.SKAI_NODE_EXE = path.join(root, 'missing node.exe');
   const result = await invoke();
-  assert.equal(result.code, 9009);
+  assert.equal(result.code, 9009, result.stdout + result.stderr);
   assert.match(result.stdout, /SKAI_NODE_EXE does not point/);
 });
 
