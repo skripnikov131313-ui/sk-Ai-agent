@@ -54,7 +54,10 @@ jobs:
             if (-not $failure) { $failure = $case.SelectSingleNode('error') }
             $details = $failure.InnerText
             if ($details.Length -gt 8000) { $details = $details.Substring(0, 8000) }
-            $summary += @('', "### $($case.name)", '```text', $details.Replace('```', '~~~'), '```')
+            $caseName = $case.GetAttribute('name')
+            $summary += @('', "### $caseName", '```text', $details.Replace('```', '~~~'), '```')
+            $message = ($caseName + ': ' + $details).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Test failed::$message"
           }
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
       - name: Test results
