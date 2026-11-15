@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions DisableDelayedExpansion
 set "NODE_EXE="
 
 rem An explicit, per-session override does not modify the system PATH.

@@ -51,15 +51,25 @@ if (process.argv.includes('fail')) process.exitCode = 13;
       });
   });
   const invoke = async (args = 'doctor') => {
-    const result = await capture(`""${launcher}" ${args}"`);
-    const diagnostic = await capture('echo PF="%ProgramFiles%"&echo PATH="%PATH%"&echo OVERRIDE="%SKAI_NODE_EXE%"&exit /b 23');
-    return { ...result, diagnostic: diagnostic.stdout + diagnostic.stderr, diagnosticCode: diagnostic.code };
+    // Windows normalizes ProgramFiles at process startup. Set these paths
+    // inside the test-owned cmd process, before CALL, so host installations
+    // cannot satisfy a missing-runtime test or shadow a fixture installation.
+    const driver = path.join(project, 'invoke-launcher.cmd');
+    const names = ['SKAI_NODE_EXE', 'PATH', 'PATHEXT', 'ProgramFiles', 'ProgramFiles(x86)', 'LOCALAPPDATA'];
+    const escape = value => value.replaceAll('%', '%%');
+    const lines = [
+      '@echo off', 'setlocal EnableExtensions DisableDelayedExpansion',
+      ...names.map(name => `set "${name}=${escape(env[name])}"`),
+      `call "${escape(launcher)}" ${args}`, 'exit /b %ERRORLEVEL%', '',
+    ];
+    await writeFile(driver, lines.join('\r\n'));
+    return capture(`""${driver}""`);
   };
   return { root, env, putNode, invoke };
 }
 
 function success(result) {
-  assert.equal(result.code, 0, result.stdout + result.stderr + result.diagnostic + `\nDiagnostic exit: ${result.diagnosticCode}`);
+  assert.equal(result.code, 0, result.stdout + result.stderr);
   return JSON.parse(result.stdout.trim());
 }
 
@@ -95,7 +105,7 @@ test('launcher honors an explicit runtime path containing spaces and ampersand',
 test('missing Node produces installation guidance without attempting installation', windows, async t => {
   const { invoke } = await setup(t);
   const result = await invoke();
-  assert.equal(result.code, 1, result.stdout + result.stderr + result.diagnostic + `\nDiagnostic exit: ${result.diagnosticCode}`);
+  assert.equal(result.code, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /Node.js was not found/);
   assert.match(result.stdout, /winget install --id OpenJS.NodeJS.LTS/);
   assert.match(result.stdout, /SKAI_NODE_EXE/);
@@ -105,7 +115,7 @@ test('invalid explicit runtime fails clearly instead of silently choosing anothe
   const { root, env, invoke } = await setup(t);
   env.SKAI_NODE_EXE = path.join(root, 'missing node.exe');
   const result = await invoke();
-  assert.equal(result.code, 1, result.stdout + result.stderr + result.diagnostic + `\nDiagnostic exit: ${result.diagnosticCode}`);
+  assert.equal(result.code, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /SKAI_NODE_EXE does not point/);
 });
 
