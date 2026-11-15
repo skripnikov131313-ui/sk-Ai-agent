@@ -3,14 +3,7 @@ setlocal
 set "NODE_EXE="
 
 rem An explicit, per-session override does not modify the system PATH.
-if defined SKAI_NODE_EXE (
-  if not exist "%SKAI_NODE_EXE%" (
-    echo SKAI_NODE_EXE does not point to an existing node.exe.
-    exit /b 1
-  )
-  set "NODE_EXE=%SKAI_NODE_EXE%"
-  goto node_found
-)
+if defined SKAI_NODE_EXE goto explicit_node
 
 rem Search the current PATH directly; do not launch another cmd via FOR /F.
 for %%N in (node.exe) do set "NODE_EXE=%%~$PATH:N"
@@ -36,6 +29,15 @@ echo To install Node.js LTS, run this command yourself in PowerShell:
 echo   winget install --id OpenJS.NodeJS.LTS --exact --source winget
 echo Then close and reopen PowerShell and retry agent.cmd doctor.
 echo For an existing runtime, set SKAI_NODE_EXE to its full node.exe path.
+exit /b 1
+
+:explicit_node
+if not exist "%SKAI_NODE_EXE%" goto missing_override
+set "NODE_EXE=%SKAI_NODE_EXE%"
+goto node_found
+
+:missing_override
+echo SKAI_NODE_EXE does not point to an existing node.exe.
 exit /b 1
 
 :node_found
