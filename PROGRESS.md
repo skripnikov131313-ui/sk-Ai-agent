@@ -48,3 +48,11 @@
 - Doctor не обнаружил Codex в PATH, авторизация пока `not confirmed`; это prerequisite реального worker, а не подтверждённая ошибка login или отсутствие подписки. `gh/cmake/dotnet` для текущей проверки не требуются.
 - Проверен WinGet manifest `OpenAI.Codex` версии `0.168.0`: x64 native exe с portable alias `codex`, sandbox helper-файлы, официальный OpenAI GitHub Release и SHA-256. В README добавлен поддерживаемый маршрут установки и проверки существующей авторизации до повторного входа.
 - Установка/вход на ПК пользователя пока не выполнялись через этот Cloud-чат. Ожидается локальная установка пакета и повторный doctor; секреты/API-ключи в чат не запрашиваются.
+
+## WinGet executable discovery и команда реальной приёмки
+
+- На ПК пользователя WinGet подтвердил `Codex CLI / OpenAI.Codex / 0.168.0`, но команды `codex.exe` и `codex` не доступны. Registry указал стандартный пользовательский package root. Запуск исходного `codex-x86_64-pc-windows-msvc.exe` по полному пути подтвердил версию `0.168.0` и `Logged in using ChatGPT`.
+- Причина отсутствующего portable alias не установлена. Повторная установка/авторизация не выполнялись. WinGet source подтверждает добавление `.exe` к PortableCommandAlias; меняем обнаружение executable в Agent, сохраняя установку и системный PATH.
+- Doctor и Runner используют общий поиск native CLI: explicit `SKAI_CODEX_EXE`, PATH, WinGet Links и ограниченные OpenAI.Codex_* package directories. Несколько unaliased packages требуют явного выбора; helper-файлы не исполняются как CLI.
+- Добавлена команда `smoke`: одна задача Codex с workspace-write и существующим лимитом 10 минут создаёт свежий marker-файл внутри игнорируемого каталога проекта. Собственный verifier проверяет обычный файл и точное содержимое, отличая model completed от пройденной приёмки. Реальный запуск на ПК пользователя ещё ожидается.
+- Локальные автоматические проверки: 47 tests, 40 passed, 7 Windows-only skipped, без failed. Новые проверки обнаружения и smoke используют filesystem/protocol fixtures; вызова модели не было.

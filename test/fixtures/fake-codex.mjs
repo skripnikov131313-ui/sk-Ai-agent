@@ -30,8 +30,15 @@ if (mode === 'descendant') {
     await writeFile(output, '{broken JSON');
   } else {
     if (mode === 'oversized') process.stdout.write('x'.repeat(200_000) + '\n');
-    const status = mode === 'credential-report' ? 'failed' : ['blocked', 'failed'].includes(mode) ? mode : 'completed';
-    await writeFile(path.join(root, 'fixture-result.txt'), 'protocol fixture changed this file\n');
+    const status = mode === 'smoke-blocked' ? 'blocked' : mode === 'credential-report' ? 'failed' : ['blocked', 'failed'].includes(mode) ? mode : 'completed';
+    if (['smoke', 'smoke-wrong'].includes(mode)) {
+      const file = /^SMOKE_FILE=(.+)$/m.exec(prompt)?.[1];
+      const marker = /^SMOKE_MARKER=(.+)$/m.exec(prompt)?.[1];
+      if (!file || !marker) throw new Error('Missing fixture smoke metadata');
+      await writeFile(path.join(root, file), mode === 'smoke-wrong' ? 'wrong marker\n' : `${marker}\n`);
+    } else {
+      await writeFile(path.join(root, 'fixture-result.txt'), 'protocol fixture changed this file\n');
+    }
     await writeFile(output, JSON.stringify({ status, summary: mode === 'credential-report' ? 'api_key="SYNTHETIC_PASSWORD"' : 'Protocol fixture result',
       checks: ['fixture ran'], filesChanged: ['fixture-result.txt'], blockers: status === 'blocked' ? ['synthetic blocker'] : [] }));
     process.stdout.write(JSON.stringify({ type: 'turn.completed' }));

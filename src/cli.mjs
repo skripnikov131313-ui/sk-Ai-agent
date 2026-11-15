@@ -3,11 +3,13 @@ import { addTask, DATA_DIR, ROOT, readTasks, recoverStore } from './store.mjs';
 import { diagnose } from './doctor.mjs';
 import { executeTask, recoverTask } from './runner.mjs';
 import { safeStatus } from './privacy.mjs';
+import { smoke } from './smoke.mjs';
 
 const HELP = `Sk/Ai Agent — ограниченный исполнитель (MVP)
 
 Из корня репозитория:
   node src/cli.mjs doctor
+  node src/cli.mjs smoke
   node src/cli.mjs add <текст задачи>
   node src/cli.mjs list
   node src/cli.mjs show <id>
@@ -22,6 +24,15 @@ Ctrl+C останавливает worker и дочерние процессы. C
 
 async function main([command, ...args]) {
   if (command === 'doctor') return console.log(JSON.stringify(await diagnose(ROOT, DATA_DIR), null, 2));
+  if (command === 'smoke') {
+    console.log('Smoke: одна задача Codex, до 10 минут. Проверяем создание свежего файла внутри проекта.');
+    const result = await smoke({ handleSignals: true });
+    console.log(`Smoke ${result.verified ? 'PASS' : 'NOT PASSED'}. Задача: ${result.task.id}. Статус: ${result.task.status}.`);
+    if (result.task.error) console.error(safeStatus(result.task.error));
+    console.log(`Подробности: node src/cli.mjs show ${result.task.id}`);
+    process.exitCode = result.exitCode;
+    return;
+  }
   if (command === 'add') {
     const task = await addTask(args.join(' '));
     return console.log(`Добавлено: ${task.id}\n${safeStatus(task.goal)}`);

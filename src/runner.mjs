@@ -6,7 +6,7 @@ import { DATA_DIR, ROOT, TASKS_FILE, isAlive, updateTask } from './store.mjs';
 import { classifyResult } from './result.mjs';
 import { runProcess } from './process.mjs';
 import { safeStatus } from './privacy.mjs';
-import { findExecutable } from './doctor.mjs';
+import { findCodex } from './doctor.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 export const MAX_ATTEMPTS = 3;
@@ -99,8 +99,8 @@ export async function executeTask(id, isResume = false, {
   try {
     await mkdir(runDir, { recursive: true, mode: 0o700 });
     await checkpoint({ outputFile: path.relative(root, outputFile) });
-    command ??= await findExecutable('codex', process.env, { nativeOnly: true });
-    if (!command || /\.(cmd|bat)$/i.test(command)) throw new Error('Native Codex CLI не найден. Проверьте doctor; shell-launcher не запускается автоматически.');
+    command ??= await findCodex();
+    if (!command || /\.(cmd|bat)$/i.test(command)) throw new Error('Native Codex CLI не найден. Проверьте doctor или задайте SKAI_CODEX_EXE; shell-launcher не запускается автоматически.');
     const prompt = `Выполни задачу в корне этого репозитория. Не устанавливай системное ПО, не публикуй данные, не используй секреты и не выходи за пределы репозитория. Выполни необходимые проверки. При блокировке верни status=blocked с причиной. Финал — JSON по переданной схеме. Не включай секреты в отчёт.\n${isResume ? 'Продолжай с сохранённого состояния, не повторяй уже выполненную работу.\n' : ''}Задача:\n${task.goal}\n`;
     const result = await runProcess(command, [...prefixArgs, ...codexArgs(root, outputFile, isResume ? sessionId : null)], {
       cwd: root, input: prompt, timeoutMs, graceMs, handleSignals,

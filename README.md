@@ -4,7 +4,7 @@
 
 ## Требования к Windows worker
 
-Нужны Git, Node.js 24+ и официальный native Codex CLI в PATH. Doctor может работать до установки Codex: `tools.codex: null` и `codexLaunch: not found` означают, что запуск задач пока недоступен. `gh`, `cmake` и `dotnet` для текущего worker необязательны.
+Нужны Git, Node.js 24+ и официальный native Codex CLI. Codex ищется в PATH и стандартных каталогах WinGet, включая сам пакет без portable alias. Doctor может работать до установки Codex: `tools.codex: null` и `codexLaunch: not found` означают, что запуск задач пока недоступен. `gh`, `cmake` и `dotnet` для текущего worker необязательны.
 
 После установки Git и Node добавьте Codex CLI вручную:
 
@@ -22,6 +22,37 @@ codex.exe login status
 Если вход не подтверждён, выполните `codex.exe login` и войдите через ChatGPT в открывшемся браузере. Затем повторите `.\agent.cmd doctor` из корня проекта. Для этого сценария используется авторизация Codex/ChatGPT; API-ключ в проект не добавляется.
 
 Пакет [OpenAI.Codex в WinGet](https://github.com/microsoft/winget-pkgs/blob/master/manifests/o/OpenAI/Codex/0.168.0/OpenAI.Codex.installer.yaml) поставляет native executable из официального GitHub Release OpenAI, alias `codex` и Windows sandbox helpers; манифест закрепляет SHA-256 архива. Это совместимый с worker способ установки без запуска PowerShell script shims. Инсталлятор может устанавливать объявленные зависимости пакета; launcher сам ничего не устанавливает.
+
+### Если пакет установлен, но команда codex не находится
+
+Запустите `.\agent.cmd doctor`: worker проверяет стандартные WinGet Links и Packages в профиле пользователя и Program Files. Поддерживаются package hardlink `codex.exe` и исходные имена x64/ARM64. Helper-файлы sandbox не принимаются за основной CLI. Файлы установленного пакета, registry и системный PATH не меняются.
+
+Для нестандартной установки можно указать native executable в текущей сессии:
+
+```powershell
+$env:SKAI_CODEX_EXE = 'C:\путь к Codex\codex-x86_64-pc-windows-msvc.exe'
+.\agent.cmd doctor
+```
+
+Если найдены несколько пакетов без однозначного alias, задайте нужный путь явно. Некорректный override и script shim завершаются ошибкой. После обнаружения CLI doctor проверяет существующую авторизацию. Если потребуется вход по полному пути:
+
+```powershell
+$diagnostic = .\agent.cmd doctor | Out-String | ConvertFrom-Json
+& ($diagnostic.tools.codex) login
+```
+
+## Проверка реального выполнения
+
+Из корня проекта:
+
+```powershell
+.\agent.cmd doctor
+.\agent.cmd smoke
+```
+
+`smoke` запускает одну реальную задачу Codex с текущей авторизацией и квотой учётной записи, до 10 минут, без автоповторов. Задача создаёт контрольный файл `.skai-agent/smoke-*.txt` в UTF-8 с новым случайным маркером. Worker независимо проверяет файл и его точное содержимое. Только после этого печатается `Smoke PASS`. При `completed` без правильного файла задача получает failed; blocked остаётся blocked. ID задачи, модельный отчёт и результат приёмки сохраняются; подробности доступны через `show <id>`.
+
+Автоматические CI-тесты этой команды используют имитатор и не вызывают модель. Реальный smoke на компьютере пользователя считается пройденным после результата фактического запуска.
 
 ## Локальная проверка
 
