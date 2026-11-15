@@ -1,8 +1,9 @@
-import { mkdir, readFile, rename, rm, open } from 'node:fs/promises';
+import { mkdir, readFile, rm, open } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { acquireStoreLock } from './file-lock.mjs';
+import { replaceFile } from './atomic-file.mjs';
 
 export const ROOT = path.resolve(import.meta.dirname, '../');
 export const DATA_DIR = path.join(ROOT, '.skai-agent');
@@ -63,7 +64,7 @@ export async function writeTasks(db, file = TASKS_FILE) {
       await handle.writeFile(`${JSON.stringify(db, null, 2)}\n`, 'utf8');
       await handle.sync();
     } finally { await handle.close(); }
-    await rename(temp, file);
+    await replaceFile(temp, file);
   } finally { await rm(temp, { force: true }); }
 }
 
