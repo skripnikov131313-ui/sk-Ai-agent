@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { DATA_DIR, ROOT, TASKS_FILE, isAlive, updateTask } from './store.mjs';
-import { classifyResult } from './result.mjs';
+import { classifyResult, explainCodexFailure } from './result.mjs';
 import { runProcess } from './process.mjs';
 import { safeStatus } from './privacy.mjs';
 import { findCodex } from './doctor.mjs';
@@ -69,6 +69,7 @@ export async function executeTask(id, isResume = false, {
   let sessionId = task.sessionId;
   let carry = '';
   let dropping = false;
+  let clientFailure = null;
   const parseLine = async line => {
     let parsed;
     try { parsed = JSON.parse(line); }
@@ -77,7 +78,10 @@ export async function executeTask(id, isResume = false, {
       sessionId = parsed.thread_id;
       await checkpoint({ sessionId });
       await event({ type: 'thread.started' });
-    } else if (['turn.started', 'turn.completed', 'turn.failed'].includes(parsed?.type)) {
+    } else if (parsed?.type === 'error' || parsed?.type === 'turn.failed') {
+      clientFailure = explainCodexFailure(parsed.message) || explainCodexFailure(parsed.error?.message) || clientFailure;
+      await event({ type: parsed.type });
+    } else if (['turn.started', 'turn.completed'].includes(parsed?.type)) {
       await event({ type: parsed.type });
     }
     // Tool messages, arbitrary payloads, and unknown event types are not logged.
@@ -114,6 +118,7 @@ export async function executeTask(id, isResume = false, {
     } catch (failure) { if (failure.code !== 'ENOENT') throw failure; }
     const interrupted = ['timeout', 'signal'].includes(result.reason);
     const classified = classifyResult(result.code, interrupted, raw);
+    if (classified.status === 'failed' && !classified.report) classified.error = clientFailure || explainCodexFailure(result.stderr) || classified.error;
     if (interrupted && result.reason === 'signal') classified.error = 'Worker остановлен пользователем.';
     if (result.error) classified.error = safeStatus(result.error.message);
     const report = classified.report ? {

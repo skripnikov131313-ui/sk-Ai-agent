@@ -8,12 +8,15 @@ import { localSession } from './local.mjs';
 import { work, WORK_DB } from './work.mjs';
 import { parseWorkOptions } from './work-options.mjs';
 import { backgroundStatus, startBackground, stopBackground, recoverBackground } from './background.mjs';
+import { createAgentServer } from './web/server.mjs';
+import { runProcess } from './process.mjs';
 
 const HELP = `Sk/Ai Agent — ограниченный исполнитель (MVP)
 
 Из корня репозитория:
   node src/cli.mjs doctor
   node src/cli.mjs local
+  node src/cli.mjs ui [--port 8741] [--open] [--paused]
   node src/cli.mjs work [план.md] [--minutes N] [--max-tasks N] [--retry-blocked]
   node src/cli.mjs work-start [те же параметры]
   node src/cli.mjs work-stop
@@ -35,6 +38,34 @@ run/resume остаются отдельными командами.
 Ctrl+C останавливает worker и дочерние процессы. Cloud-сессия имеет собственные лимиты.`;
 
 async function main([command, ...args]) {
+  if (command === 'ui') {
+    let port = 8741;
+    let open = false;
+    let paused = false;
+    for (let index = 0; index < args.length; index++) {
+      if (args[index] === '--port') {
+        port = Number(args[++index]);
+        if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port: целое число от 0 до 65535.');
+      } else if (args[index] === '--open') open = true;
+      else if (args[index] === '--paused') paused = true;
+      else throw new Error(`Неизвестный аргумент ui: ${args[index]}`);
+    }
+    const app = await createAgentServer({ port, executionEnabled: !paused });
+    let closing;
+    const shutdown = () => {
+      if (closing) return;
+      closing = app.close().catch(error => { console.error(safeStatus(error.message)); process.exitCode = 1; })
+        .finally(() => { process.off('SIGINT', shutdown); process.off('SIGTERM', shutdown); });
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+    console.log(`Sk/Ai Agent UI: ${app.origin}\nCtrl+C — остановить панель и её текущую задачу. Закрытие вкладки не останавливает очередь.`);
+    if (paused) console.log('Запуск Codex приостановлен; задачи можно создавать и просматривать.');
+    if (open && process.platform === 'win32') {
+      await runProcess('cmd.exe', ['/d', '/c', 'start', '', app.origin], { cwd: ROOT, timeoutMs: 10_000 });
+    }
+    return;
+  }
   if (command === 'work' || command === 'work-start') {
     const options = parseWorkOptions(args);
     console.log(safeStatus(`Работа по ${options.source}: ${options.budgetMs === null ? 'без общего таймера' : `до ${options.budgetMs / 60_000} минут`}, ${options.maxTasks === 100 ? 'весь исходный план' : `до ${options.maxTasks} пунктов`}, до 3 попыток на пункт.`));

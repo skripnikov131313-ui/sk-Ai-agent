@@ -7,6 +7,7 @@ import { executeTask, recoverTask, MAX_ATTEMPTS } from '../src/runner.mjs';
 import { runProcess } from '../src/process.mjs';
 import { findExecutable, diagnose } from '../src/doctor.mjs';
 import { safeStatus } from '../src/privacy.mjs';
+import { explainCodexFailure } from '../src/result.mjs';
 
 // fileURLToPath is necessary for drive letters and spaces on Windows.
 import { fileURLToPath } from 'node:url';
@@ -147,6 +148,22 @@ test('failed reports redact credentials both in database error and retained JSON
   assert.match(report.summary, /REDACTED/);
   assert.doesNotMatch(await readFile(dbFile, 'utf8'), /SYNTHETIC_PASSWORD/);
   assert.doesNotMatch(await readFile(result.outputFile, 'utf8'), /SYNTHETIC_PASSWORD/);
+});
+
+test('client authentication failure is actionable without retaining provider payloads', async t => {
+  const { task, dbFile, options } = await setup(t);
+  const result = await executeTask(task.id, false, { ...options, prefixArgs: [fixturePath, 'auth-error'] });
+  assert.equal(result.task.status, 'failed');
+  assert.match(result.task.error, /повторного входа/);
+  const events = await readFile(path.join(path.dirname(result.outputFile), 'events.jsonl'), 'utf8');
+  assert.doesNotMatch(events + await readFile(dbFile, 'utf8'), /SYNTHETIC_PROVIDER_SECRET|Bearer|authentication token/);
+});
+
+test('startup diagnostics ignore the harmless alias warning and preserve unknown failures', () => {
+  assert.equal(explainCodexFailure('WARNING: proceeding, even though we could not create PATH aliases: Read-only file system'), null);
+  assert.match(explainCodexFailure('Error: failed to initialize in-process app-server client: Read-only file system (os error 30)'), /служебные файлы/);
+  assert.match(explainCodexFailure('CONNECT tunnel failed, response 403'), /Прокси/);
+  assert.equal(explainCodexFailure('An unknown message with arbitrary payload'), null);
 });
 
 test('process error and timeout have distinct outcomes', async () => {
