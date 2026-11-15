@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, rm, open } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
+import { acquireStoreLock } from './file-lock.mjs';
 
 export const ROOT = path.resolve(import.meta.dirname, '../');
 export const DATA_DIR = path.join(ROOT, '.skai-agent');
@@ -16,15 +17,7 @@ export function isAlive(pid) {
 async function transaction(file, change) {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const lockFile = `${file}.lock`;
-  let lock;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    try { lock = await open(lockFile, 'wx', 0o600); break; }
-    catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-      await new Promise(resolve => setTimeout(resolve, 20));
-    }
-  }
-  if (!lock) throw new Error('Очередь занята. Если процесс остановлен, выполните recover-store.');
+  const lock = await acquireStoreLock(lockFile);
   try {
     await lock.writeFile(JSON.stringify({ pid: process.pid, host: os.hostname() }));
     const db = await readTasks(file);

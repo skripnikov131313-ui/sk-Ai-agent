@@ -12,8 +12,15 @@ jobs:
   test:
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
-        os: [ubuntu-24.04, windows-2022]
+        include:
+          - os: ubuntu-24.04
+            node: '24.22.1'
+          - os: windows-2022
+            node: '24.22.1'
+          - os: windows-2022
+            node: '26.13.1'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
@@ -22,7 +29,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24.22.1'
+          node-version: ${{ matrix.node }}
       - name: Unit and protocol integration tests (no model calls)
         shell: pwsh
         run: |
@@ -48,7 +55,7 @@ jobs:
           $cases = @($report.SelectNodes('//testcase'))
           $failed = @($cases | Where-Object { $_.SelectSingleNode('failure') -or $_.SelectSingleNode('error') })
           $skipped = @($cases | Where-Object { $_.SelectSingleNode('skipped') })
-          $summary = @("## Tests on $env:RUNNER_OS", '', "Cases: $($cases.Count); failures: $($failed.Count); skipped: $($skipped.Count)")
+          $summary = @("## Tests on $env:RUNNER_OS / Node ${{ matrix.node }}", '', "Cases: $($cases.Count); failures: $($failed.Count); skipped: $($skipped.Count)")
           foreach ($case in $failed) {
             $failure = $case.SelectSingleNode('failure')
             if (-not $failure) { $failure = $case.SelectSingleNode('error') }
@@ -64,7 +71,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: agent-tests-${{ matrix.os }}
+          name: agent-tests-${{ matrix.os }}-node-${{ matrix.node }}
           path: .skai-agent/ci/results.xml
           if-no-files-found: error
           retention-days: 7

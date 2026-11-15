@@ -51,7 +51,11 @@ test('concurrent changes do not lose queued tasks or leave temporary files', asy
   const dir = await makeTemp('skai-concurrent-');
   t.after(() => rm(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'tasks.json');
-  await Promise.all(Array.from({ length: 16 }, (_, i) => addTask(`Concurrent task ${i}`, file)));
+  const results = await Promise.allSettled(Array.from({ length: 16 }, (_, i) => addTask(`Concurrent task ${i}`, file)));
+  // Wait for every writer before asserting or cleaning its directory. An early
+  // rejection must not let cleanup race with the remaining queue writers.
+  const failures = results.filter(result => result.status === 'rejected');
+  assert.equal(failures.length, 0, failures.map(result => result.reason.stack).join('\n'));
   const db = await readTasks(file);
   assert.equal(db.tasks.length, 16);
   assert.equal(new Set(db.tasks.map(task => task.id)).size, 16);

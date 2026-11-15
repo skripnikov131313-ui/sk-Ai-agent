@@ -64,3 +64,10 @@
 - Источник этой Windows-проверки — вывод PowerShell, присланный пользователем. Доступ Cloud к ноутбуку не предоставлялся. API-ключи/значения credentials не запрашивались и не публиковались.
 - [CI 43714755887](https://github.com/skripnikov131313-ui/sk-Ai-agent/actions/runs/43714755887) для `7337908` успешно прошёл на Linux и Windows. Это отдельные автоматические проверки с fixtures.
 - Запрошены чтение сохранённой задачи через `show` и полный test suite на пользовательском Node.js 26. Отдельно остаются реальный interrupt/resume, отрицательные sandbox-проверки, mobile/offline продолжение и фактические квоты. Эти пункты одним Smoke PASS не закрываются.
+
+## 2026-11-15 — сохранённая сессия подтверждена; Windows lock regression
+
+- Присланный пользователем вывод show подтвердил completed, одну попытку, непустой session ID, lastExitCode=0 и acceptance.verified=true. Worker и child PID очищены. Полный исходный transcript, hostname и session ID в репозиторий не добавляются.
+- На Windows Node 26.13.1 прошли 46 из 47 тестов. Concurrent changes test завершился EPERM при exclusive open tasks.json.lock. Исходный код повторял только EEXIST; точная причина системного EPERM по выводу не устанавливается.
+- Захват lock теперь ограниченно повторяет тот же exclusive open при Windows EPERM/EACCES/EBUSY. Lock не крадётся, права не меняются, устойчивый отказ сохраняет исходную ошибку. Тест ждёт все конкурентные записи до cleanup, включая ошибочные завершения.
+- Добавлены восемь регрессионных проверок lock. Локально: 55 tests, 48 passed, 7 Windows-only skipped. CI добавляет Windows Node 26.13.1; одновременно выполняются максимум два из трёх заданий. Повторный результат на ПК пользователя пока ожидается.
