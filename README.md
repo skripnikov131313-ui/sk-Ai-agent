@@ -20,7 +20,22 @@ agent.cmd list
 agent.cmd run <id>
 ```
 
-Launcher ищет Node.js в PATH или в установленном пакете Codex Desktop, ничего не устанавливает и не меняет системные настройки. Путь к внутреннему runtime может меняться при обновлениях приложения.
+Launcher требует Node.js 24 или новее. Он ищет runtime через явный `SKAI_NODE_EXE`, PATH, стандартные папки Node.js и пакет Codex Desktop. Имена MSIX с точкой и подчёркиванием перед версией поддерживаются. Launcher ничего не устанавливает и не меняет системные настройки. Путь к внутреннему runtime может меняться при обновлениях приложения; наличие самого Codex Desktop не гарантирует доступность отдельного `node.exe`.
+
+Если Node не найден, установите его в Windows самостоятельно:
+
+```powershell
+winget install --id OpenJS.NodeJS.LTS --exact --source winget
+```
+
+Закройте PowerShell, откройте заново и проверьте `node --version`, затем из папки проекта выполните `.\agent.cmd doctor`. Для существующего нестандартного runtime можно задать путь только для текущей сессии:
+
+```powershell
+$env:SKAI_NODE_EXE = 'C:\путь к Node\node.exe'
+.\agent.cmd doctor
+```
+
+Если заданный путь отсутствует или выбранный Node несовместим, launcher завершится с явной ошибкой. Он не подменяет ошибочный override другим runtime.
 
 ## Текущие ограничения
 
