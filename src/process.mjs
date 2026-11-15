@@ -1,14 +1,16 @@
 import { spawn } from 'node:child_process';
 
-// No shell, inherited credentials, bounded diagnostics, and a private process
-// group on POSIX. Injection of a command is only an internal testing seam.
+// No shell, inherited credentials, bounded diagnostics. POSIX worker commands
+// get a private process group; interactive clients share the user's terminal.
+// Injection of a command is only an internal testing seam.
 export async function runProcess(command, args, {
   cwd, input = '', timeoutMs = 600_000, graceMs = 500,
-  onStdout, onSpawn, handleSignals = false,
+  onStdout, onSpawn, handleSignals = false, inheritStdio = false,
 } = {}) {
+  const grouped = process.platform !== 'win32' && !inheritStdio;
   const child = spawn(command, args, {
-    cwd, windowsHide: true, detached: process.platform !== 'win32',
-    stdio: ['pipe', 'pipe', 'pipe'],
+    cwd, windowsHide: !inheritStdio, detached: grouped,
+    stdio: inheritStdio ? 'inherit' : ['pipe', 'pipe', 'pipe'],
   });
   let error;
   let stdout = '';
@@ -17,7 +19,8 @@ export async function runProcess(command, args, {
   let killing = Promise.resolve();
   const killGroup = signal => {
     if (!child.pid) return;
-    try { process.kill(-child.pid, signal); }
+    if (!grouped && (child.exitCode !== null || child.signalCode !== null)) return;
+    try { process.kill(grouped ? -child.pid : child.pid, signal); }
     catch (failure) { if (failure.code !== 'ESRCH') error ??= failure; }
   };
   const stop = why => {
@@ -44,13 +47,14 @@ export async function runProcess(command, args, {
     child.once('close', code => resolve(code ?? 1));
   });
   // Missing executables can close stdin before the prompt is written.
-  child.stdin.on('error', failure => { if (failure.code !== 'EPIPE') error ??= failure; });
+  child.stdin?.on('error', failure => { if (failure.code !== 'EPIPE') error ??= failure; });
   if (handleSignals) {
     process.on('SIGINT', onInterrupt);
     process.on('SIGTERM', onInterrupt);
   }
   const timer = setTimeout(() => stop('timeout'), timeoutMs);
   const consume = async (stream, callback) => {
+    if (!stream) return;
     try { for await (const chunk of stream) await callback(chunk.toString()); }
     catch (failure) { error ??= failure; stop('io-error'); }
   };
@@ -64,7 +68,7 @@ export async function runProcess(command, args, {
       try { await onSpawn(child.pid); }
       catch (failure) { error ??= failure; stop('io-error'); }
     }
-    child.stdin.end(input);
+    child.stdin?.end(input);
     const code = await exited;
     await killing;
     await Promise.all([output, diagnostics]);

@@ -10,7 +10,7 @@
 - [x] Испытать реальное изменение файла через `.\agent.cmd smoke`: пользователь подтвердил `Smoke PASS`, задача `0b7edf0d-5920-4d51-8a17-f4f0c80b6567`, completed, 2026-11-15.
 - [x] Подтвердить на ПК пользователя запуск native Codex CLI `0.168.0` по полному пути и существующую авторизацию ChatGPT.
 - [x] Подтвердить через новый процесс `show` сохранение session ID и verified acceptance после реального Windows smoke.
-- [ ] Повторно пройти Windows Node 26 suite после исправления конкурентного EPERM на tasks.json.lock (исходный результат: 46/47).
+- [x] Повторно пройти Windows Node 26 suite после исправления конкурентного EPERM: пользователь прислал 55/55 passed, 0 failed, 0 skipped для `8a0f508`.
 - [x] Проверить checkpoint ID сессии, recover/resume, защиту от старого отчёта, одновременный запуск и POSIX tree kill на имитаторе CLI.
 - [ ] Проверить те же сценарии с настоящим Codex на Windows, включая границы sandbox.
 

@@ -20,7 +20,8 @@
 
 - 2026-11-15 пользователь выполнил `.\agent.cmd doctor` и `.\agent.cmd smoke` на Windows x64 с Node.js `26.13.1` и Codex CLI `0.168.0`. Doctor подтвердил native launch и существующую авторизацию ChatGPT. Smoke проверил свежий marker-файл и вернул PASS / completed для `0b7edf0d-5920-4d51-8a17-f4f0c80b6567`. Источник подтверждения — предоставленный пользователем вывод Windows PowerShell.
 - Пользовательский `show` подтвердил сохранённый session ID, completed, attempts=1, lastExitCode=0, acceptance.verified=true после завершения worker. Значение session ID и имя ПК в репозиторий не копируются.
-- Пользовательский suite на Node.js 26.13.1 выполнил 47 тестов: 46 passed, 1 failed. Конкурентный тест очереди получил EPERM на tasks.json.lock. Для исправленной версии требуется повторный локальный запуск; CI расширен Windows Node 26.13.1 наряду с Windows/Linux Node 24.22.1.
+- Первый пользовательский suite на Node.js 26.13.1 выполнил 47 тестов: 46 passed, 1 failed (EPERM на tasks.json.lock). После обновления до `8a0f508` пользователь прислал повторный suite: **55 tests, 55 passed, 0 failed, 0 skipped**, duration 16.879 s. Регрессия на этом ПК закрыта.
+- `test/local.test.mjs` проверяет native client launch с наследованием terminal stdio, workspace-write/cwd/context, ненулевой код клиента и ограничение времени. Используется fixture-клиент без модели. Реальный интерактивный интерфейс Codex на ПК пользователя этим не проверяется.
 - Прервать выполнение, проверить отсутствие дочерних процессов, затем явно восстановить и продолжить задачу.
 - `agent.cmd list` должен работать даже если `node` не в PATH. Native Codex executable должен быть доступен отдельно; shell batch launcher автоматически не запускается.
 

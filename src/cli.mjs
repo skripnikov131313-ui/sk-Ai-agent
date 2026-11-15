@@ -4,11 +4,13 @@ import { diagnose } from './doctor.mjs';
 import { executeTask, recoverTask } from './runner.mjs';
 import { safeStatus } from './privacy.mjs';
 import { smoke } from './smoke.mjs';
+import { localSession } from './local.mjs';
 
 const HELP = `Sk/Ai Agent — ограниченный исполнитель (MVP)
 
 Из корня репозитория:
   node src/cli.mjs doctor
+  node src/cli.mjs local
   node src/cli.mjs smoke
   node src/cli.mjs add <текст задачи>
   node src/cli.mjs list
@@ -23,6 +25,16 @@ const HELP = `Sk/Ai Agent — ограниченный исполнитель (M
 Ctrl+C останавливает worker и дочерние процессы. Cloud-сессия имеет собственные лимиты.`;
 
 async function main([command, ...args]) {
+  if (command === 'local') {
+    if (process.platform !== 'win32') throw new Error('Команду local нужно запускать в терминале Windows-ПК. Этот Cloud-чат остаётся в облаке.');
+    if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Откройте обычное окно терминала Windows и выполните agent.cmd local без перенаправления вывода.');
+    console.log('Открываю локальный Codex в этом проекте. Он выполняет команды на Windows-ПК. Лимит сессии — 10 минут.');
+    const result = await localSession();
+    console.log(result.reason === 'timeout' ? 'Локальная сессия остановлена по лимиту 10 минут.' : 'Локальная сессия Codex закрыта.');
+    if (result.error) console.error(safeStatus(result.error.message));
+    process.exitCode = result.reason === 'timeout' ? 124 : result.reason === 'signal' ? 130 : result.code;
+    return;
+  }
   if (command === 'doctor') return console.log(JSON.stringify(await diagnose(ROOT, DATA_DIR), null, 2));
   if (command === 'smoke') {
     console.log('Smoke: одна задача Codex, до 10 минут. Проверяем создание свежего файла внутри проекта.');
