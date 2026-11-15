@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { acquireStoreLock } from './file-lock.mjs';
 import { replaceFile } from './atomic-file.mjs';
+import { createWorkerProfile, reconcileWaitingTasks, taskRequirements, validateDependencies } from './routing.mjs';
 
 export const ROOT = path.resolve(import.meta.dirname, '../');
 export const DATA_DIR = path.join(ROOT, '.skai-agent');
@@ -68,29 +69,34 @@ export async function writeTasks(db, file = TASKS_FILE) {
   } finally { await rm(temp, { force: true }); }
 }
 
-export function newTask(goal) {
+export function newTask(goal, requirements = {}) {
   const normalized = String(goal ?? '').trim();
   if (normalized.length < 5 || normalized.length > 4000) {
     throw new Error('Задача должна содержать от 5 до 4000 символов.');
   }
   const now = new Date().toISOString();
   const task = {
-    id: randomUUID(), goal: normalized, status: 'queued', createdAt: now,
+    id: randomUUID(), goal: normalized, ...taskRequirements(requirements), status: 'queued', createdAt: now,
     updatedAt: now, attempts: 0, sessionId: null, lastExitCode: null,
   };
   return task;
 }
 
-export async function addTask(goal, dbFile = TASKS_FILE) {
-  const task = newTask(goal);
-  return transaction(dbFile, db => { db.tasks.push(task); return task; });
+export async function addTask(goal, dbFile = TASKS_FILE, requirements = {}, worker = createWorkerProfile()) {
+  const task = newTask(goal, requirements);
+  return transaction(dbFile, db => {
+    validateDependencies(task, db.tasks);
+    db.tasks.push(task);
+    reconcileWaitingTasks(db, worker);
+    return task;
+  });
 }
 
 export async function updateTask(id, patch, dbFile = TASKS_FILE, check = () => {}) {
   return transaction(dbFile, db => {
     const task = db.tasks.find(item => item.id === id);
     if (!task) throw new Error(`Задача не найдена: ${id}`);
-    check(task);
+    check(task, db);
     Object.assign(task, typeof patch === 'function' ? patch(task) : patch, { updatedAt: new Date().toISOString() });
     return task;
   });

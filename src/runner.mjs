@@ -7,6 +7,7 @@ import { classifyResult, explainCodexFailure } from './result.mjs';
 import { runProcess } from './process.mjs';
 import { safeStatus } from './privacy.mjs';
 import { findCodex } from './doctor.mjs';
+import { createWorkerProfile, evaluateTaskRoute } from './routing.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 export const MAX_ATTEMPTS = 3;
@@ -37,21 +38,29 @@ export async function recoverTask(id, dbFile = TASKS_FILE) {
 export async function executeTask(id, isResume = false, {
   root = ROOT, dataDir = DATA_DIR, dbFile = TASKS_FILE,
   command, prefixArgs = [], timeoutMs = 600_000, graceMs = 500, handleSignals = false, signal,
+  desktop = false, worker = createWorkerProfile({ desktop }),
 } = {}) {
+  worker = createWorkerProfile(worker);
   if (!UUID.test(id || '')) throw new Error('Ожидается UUID задачи из команды list.');
   const runToken = randomUUID();
-  const task = await updateTask(id, current => ({
+  let route;
+  const task = await updateTask(id, current => !route.eligible ? {
+    status: 'waiting', waitingReason: { code: route.code, message: route.message },
+  } : ({
     status: 'running', attempts: current.attempts + 1, startedAt: new Date().toISOString(),
     finishedAt: null, lastExitCode: null, error: null, report: null,
-    workerPid: process.pid, workerHost: os.hostname(), childPid: null, runToken,
-  }), dbFile, current => {
+    workerPid: process.pid, workerHost: os.hostname(), childPid: null, runToken, waitingReason: null,
+  }), dbFile, (current, db) => {
     if (current.status === 'running') throw new Error('Задача уже выполняется. Для остановленного worker используйте recover.');
     if (current.attempts >= MAX_ATTEMPTS) throw new Error(`Достигнут лимит ${MAX_ATTEMPTS} попыток. Создайте отдельную задачу.`);
     if (isResume) {
       if (!['interrupted', 'failed', 'blocked'].includes(current.status)) throw new Error('Возобновить можно только interrupted/failed/blocked задачу.');
       if (!UUID.test(current.sessionId || '')) throw new Error('Нет сохранённой сессии Codex; создайте новую задачу.');
-    } else if (current.status !== 'queued') throw new Error('Для продолжения используйте resume; повторный run запрещён.');
+    } else if (!['queued', 'waiting'].includes(current.status)) throw new Error('Для продолжения используйте resume; повторный run запрещён.');
+    route = evaluateTaskRoute(current, db.tasks, worker);
+    if (!route.eligible && isResume) throw new Error(route.message);
   });
+  if (!route.eligible) return { task, outputFile: null, exitCode: 3 };
   // Each attempt gets a new output file so stale successes cannot be reused.
   const runDir = path.join(dataDir, 'runs', id, `attempt-${task.attempts}-${runToken}`);
   const eventFile = path.join(runDir, 'events.jsonl');
@@ -105,7 +114,7 @@ export async function executeTask(id, isResume = false, {
     await checkpoint({ outputFile: path.relative(root, outputFile) });
     command ??= await findCodex();
     if (!command || /\.(cmd|bat)$/i.test(command)) throw new Error('Native Codex CLI не найден. Проверьте doctor или задайте SKAI_CODEX_EXE; shell-launcher не запускается автоматически.');
-    const prompt = `Выполни задачу в корне этого репозитория. Не устанавливай системное ПО, не публикуй данные, не используй секреты и не выходи за пределы репозитория. Выполни необходимые проверки. При блокировке верни status=blocked с причиной. Финал — JSON по переданной схеме. Не включай секреты в отчёт.\n${isResume ? 'Продолжай с сохранённого состояния, не повторяй уже выполненную работу.\n' : ''}Задача:\n${task.goal}\n`;
+    const prompt = `Выполни задачу в корне этого репозитория. Не устанавливай системное ПО, не публикуй данные, не используй секреты и не выходи за пределы репозитория. Выполни необходимые проверки. При блокировке верни status=blocked с причиной. Финал — JSON по переданной схеме. Не включай секреты в отчёт.\nИсполнитель: ${worker.platform}; Windows GUI заявлен оператором: ${worker.desktop ? 'да' : 'нет'}. Требование задачи: ${task.target ?? 'current'}. Наличие флага GUI не доказывает доступность инструментов: если их нет, верни blocked.\n${isResume ? 'Продолжай с сохранённого состояния, не повторяй уже выполненную работу.\n' : ''}Задача:\n${task.goal}\n`;
     const result = await runProcess(command, [...prefixArgs, ...codexArgs(root, outputFile, isResume ? sessionId : null)], {
       cwd: root, input: prompt, timeoutMs, graceMs, handleSignals, signal,
       onStdout: consume, onSpawn: pid => checkpoint({ childPid: pid }),

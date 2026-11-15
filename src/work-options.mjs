@@ -11,6 +11,7 @@ export function parseWorkOptions(args) {
       options.maxTasks = Number(args[++i]);
       if (!Number.isInteger(options.maxTasks) || options.maxTasks < 1 || options.maxTasks > 100) throw new Error('--max-tasks: целое число от 1 до 100.');
     } else if (args[i] === '--retry-blocked') options.retryBlocked = true;
+    else if (args[i] === '--desktop') options.desktop = true;
     else if (!args[i].startsWith('-') && !hasSource) { options.source = args[i]; hasSource = true; }
     else throw new Error(`Неизвестный аргумент work: ${args[i]}`);
   }

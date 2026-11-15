@@ -6,6 +6,7 @@ import { acquireStoreLock } from './file-lock.mjs';
 import { DATA_DIR, ROOT, newTask, readTasks, transaction, updateTask } from './store.mjs';
 import { executeTask, MAX_ATTEMPTS } from './runner.mjs';
 import { safeStatus } from './privacy.mjs';
+import { createWorkerProfile, evaluateTaskRoute, reconcileWaitingTasks } from './routing.mjs';
 
 export const WORK_DB = path.join(DATA_DIR, 'work', 'tasks.json');
 const within = (root, file) => {
@@ -40,7 +41,8 @@ export function parsePlan(source) {
     const key = createHash('sha256').update(`${section}\n${text}`).digest('hex');
     if (keys.has(key)) throw new Error('Одинаковые пункты в одном разделе плана неоднозначны.');
     keys.add(key);
-    items.push({ key, text, section, checked: match[1] !== ' ' });
+    const target = /^\[(windows|windows-gui)\]\s+/.exec(text)?.[1] ?? 'current';
+    items.push({ key, text, section, target, checked: match[1] !== ' ' });
     if (items.length > 100) throw new Error('План содержит больше 100 пунктов.');
   }
   return items;
@@ -74,7 +76,9 @@ export async function work({
   source = 'TASKS.md', budgetMs = null, taskTimeoutMs = 600_000,
   maxTasks = 100, maxAttempts = MAX_ATTEMPTS, retryBlocked = false, command, prefixArgs = [], graceMs = 500,
   handleSignals = false, signal, onProgress = () => {}, onReady = () => {},
+  desktop = false, worker = createWorkerProfile({ desktop }),
 } = {}) {
+  worker = createWorkerProfile(worker);
   if ((budgetMs !== null && (!Number.isSafeInteger(budgetMs) || budgetMs < 1 || Date.now() + budgetMs > 8_640_000_000_000_000)) ||
       !Number.isSafeInteger(taskTimeoutMs) || taskTimeoutMs < 1 || taskTimeoutMs > 600_000 ||
       !Number.isSafeInteger(maxTasks) || maxTasks < 1 || maxTasks > 100 ||
@@ -114,17 +118,22 @@ export async function work({
         let task = db.tasks.find(task => task.work?.source === source && task.work.key === item.key);
         if (item.checked && !task) continue;
         if (!task) {
-          task = { ...newTask(goalFor(item, source)), work: { source, ...item, verified: false } };
+          task = { ...newTask(goalFor(item, source), { target: item.target }), work: { source, ...item, verified: false } };
           db.tasks.push(task);
+        }
+        if (task.target === undefined) task.target = item.target;
+        reconcileWaitingTasks(db, worker);
+        if (item.checked && ['queued', 'waiting'].includes(task.status)) {
+          Object.assign(task, { status: 'skipped', waitingReason: null, error: 'Пункт уже отмечен в плане; повторного запуска нет.' });
         }
         // A crash after the executor's completed checkpoint must not bypass
         // acceptance, even when the model already checked the plan item.
         if (task.status === 'completed' && !task.work.verified) Object.assign(task, acceptance(task, item, source));
         if (task.status !== 'completed' && task.status !== 'skipped') {
           selected.push(task.id);
-          if (task.status === 'queued' || (task.attempts < maxAttempts && task.sessionId &&
+          if (evaluateTaskRoute(task, db.tasks, worker).eligible && (task.status === 'queued' || (task.attempts < maxAttempts && task.sessionId &&
               (task.status === 'interrupted' || (task.status === 'failed' && task.report) ||
-              (task.status === 'blocked' && retryBlocked)))) runnable++;
+              (task.status === 'blocked' && retryBlocked))))) runnable++;
         }
         if (runnable >= maxTasks) break;
       }
@@ -137,10 +146,18 @@ export async function work({
     });
     await onReady();
     for (const id of ids) {
-      let task = (await readTasks(dbFile)).tasks.find(task => task.id === id);
+      if (controller.signal.aborted) return await finish('interrupted', 130, 'Остановлено пользователем.');
+      if (deadline !== null && Date.now() >= deadline) return await finish('interrupted', 124, 'Достигнут общий лимит времени; прогресс сохранён.');
+      const db = await readTasks(dbFile);
+      let task = db.tasks.find(task => task.id === id);
       // A real blocker is recorded once. It cannot consume every new launch.
       if (task.status === 'blocked' && !retryBlocked) continue;
       if (task.status === 'running') return await finish('blocked', 2, 'Остался running worker: сначала подтвердите его остановку через work-recover.');
+      const route = evaluateTaskRoute(task, db.tasks, worker);
+      if (!route.eligible) {
+        await onProgress({ type: 'waiting', taskId: id, text: task.work.text, error: route.message });
+        continue;
+      }
       while (true) {
         if (controller.signal.aborted) return await finish('interrupted', 130, 'Остановлено пользователем.');
         if (deadline !== null && Date.now() >= deadline) return await finish('interrupted', 124, 'Достигнут общий лимит времени; прогресс сохранён.');
@@ -149,16 +166,16 @@ export async function work({
           task = await updateTask(id, { status: 'blocked', error: 'Пункт плана удалён или изменён во время работы.' }, dbFile);
           break;
         }
-        if (current.checked && task.status === 'queued') {
+        if (current.checked && ['queued', 'waiting'].includes(task.status)) {
           task = await updateTask(id, { status: 'skipped', error: 'Пункт уже отмечен в плане; повторного запуска нет.' }, dbFile);
           break;
         }
-        const resume = task.status !== 'queued';
+        const resume = !['queued', 'waiting'].includes(task.status);
         if (resume && (task.attempts >= maxAttempts || !task.sessionId ||
             !(task.status === 'interrupted' || (task.status === 'failed' && task.report) ||
             (task.status === 'blocked' && retryBlocked)))) break;
         await onProgress({ type: 'starting', taskId: id, text: task.work.text, attempt: task.attempts + 1 });
-        const result = await executeTask(id, resume, { root, dataDir, dbFile, command, prefixArgs,
+        const result = await executeTask(id, resume, { root, dataDir, dbFile, command, prefixArgs, worker,
           graceMs, signal: controller.signal, timeoutMs: deadline === null ? taskTimeoutMs : Math.max(1, Math.min(taskTimeoutMs, deadline - Date.now())) });
         task = result.task;
         if (controller.signal.aborted || result.exitCode === 130) return await finish('interrupted', 130, 'Остановлено пользователем.');
@@ -173,7 +190,7 @@ export async function work({
         if (task.status === 'failed' && !task.report) {
           return await finish('failed', 1, 'Нет корректного отчёта Codex. Следующие вызовы не запускаются; проверьте ошибку, авторизацию и доступную квоту.');
         }
-        if (['completed', 'blocked'].includes(task.status)) break;
+        if (['completed', 'blocked', 'waiting'].includes(task.status)) break;
         // No automatic retry of missing reports, login, quota or spawn errors.
         // Only a saved session with an explicit failed report or timeout resumes.
       }
@@ -181,6 +198,7 @@ export async function work({
     const final = await readTasks(dbFile);
     const tasks = final.tasks.filter(task => ids.includes(task.id));
     if (tasks.some(task => task.status === 'blocked')) return await finish('blocked', 2, 'Есть блокеры; независимые пункты плана обработаны.');
+    if (tasks.some(task => task.status === 'waiting') && tasks.every(task => ['completed', 'skipped', 'waiting'].includes(task.status))) return await finish('waiting', 3, 'Доступные пункты обработаны. Остальные ожидают подходящую среду; попытки не расходуются.');
     if (tasks.some(task => !['completed', 'skipped'].includes(task.status))) return await finish('failed', 1, 'Часть пунктов не завершена; лимит повторов не увеличивается автоматически.');
     if (final.controller.deferredCount) return await finish('paused', 0, 'Достигнут лимит пунктов одного запуска; оставшиеся пункты сохранены в плане.');
     return await finish('completed', 0, 'Все выбранные пункты обработаны. Новые пункты не запускались.');

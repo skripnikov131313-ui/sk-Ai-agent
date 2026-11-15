@@ -47,7 +47,7 @@ export async function startBackground(options = {}) {
     const configFile = path.join(directory, 'config.json');
     const logFile = path.join(directory, 'worker.log');
     const config = { root, dataDir, dbFile: options.dbFile ?? path.join(dataDir, 'tasks.json') };
-    for (const key of ['source', 'budgetMs', 'taskTimeoutMs', 'maxTasks', 'maxAttempts', 'retryBlocked', 'command', 'prefixArgs', 'graceMs']) {
+    for (const key of ['source', 'budgetMs', 'taskTimeoutMs', 'maxTasks', 'maxAttempts', 'retryBlocked', 'desktop', 'command', 'prefixArgs', 'graceMs']) {
       if (options[key] !== undefined) config[key] = options[key];
     }
     const log = await open(logFile, 'a', 0o600);

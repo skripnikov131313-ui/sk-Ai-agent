@@ -10,24 +10,26 @@ import { parseWorkOptions } from './work-options.mjs';
 import { backgroundStatus, startBackground, stopBackground, recoverBackground } from './background.mjs';
 import { createAgentServer } from './web/server.mjs';
 import { runProcess } from './process.mjs';
+import { createWorkerProfile, evaluateTaskRoute } from './routing.mjs';
+import { parseTaskOptions } from './task-options.mjs';
 
 const HELP = `Sk/Ai Agent — ограниченный исполнитель (MVP)
 
 Из корня репозитория:
   node src/cli.mjs doctor
   node src/cli.mjs local
-  node src/cli.mjs ui [--port 8741] [--open] [--paused]
-  node src/cli.mjs work [план.md] [--minutes N] [--max-tasks N] [--retry-blocked]
+  node src/cli.mjs ui [--port 8741] [--open] [--paused] [--desktop]
+  node src/cli.mjs work [план.md] [--minutes N] [--max-tasks N] [--retry-blocked] [--desktop]
   node src/cli.mjs work-start [те же параметры]
   node src/cli.mjs work-stop
   node src/cli.mjs work-status
   node src/cli.mjs work-recover
   node src/cli.mjs smoke
-  node src/cli.mjs add <текст задачи>
+  node src/cli.mjs add [--target current|windows|windows-gui] [--after UUID] <текст задачи>
   node src/cli.mjs list
   node src/cli.mjs show <id>
-  node src/cli.mjs run <id>
-  node src/cli.mjs resume <id>
+  node src/cli.mjs run <id> [--desktop]
+  node src/cli.mjs resume <id> [--desktop]
   node src/cli.mjs recover <id>
   node src/cli.mjs recover-store
 
@@ -42,15 +44,17 @@ async function main([command, ...args]) {
     let port = 8741;
     let open = false;
     let paused = false;
+    let desktop = false;
     for (let index = 0; index < args.length; index++) {
       if (args[index] === '--port') {
         port = Number(args[++index]);
         if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port: целое число от 0 до 65535.');
       } else if (args[index] === '--open') open = true;
       else if (args[index] === '--paused') paused = true;
+      else if (args[index] === '--desktop') desktop = true;
       else throw new Error(`Неизвестный аргумент ui: ${args[index]}`);
     }
-    const app = await createAgentServer({ port, executionEnabled: !paused });
+    const app = await createAgentServer({ port, executionEnabled: !paused, desktop });
     let closing;
     const shutdown = () => {
       if (closing) return;
@@ -68,6 +72,7 @@ async function main([command, ...args]) {
   }
   if (command === 'work' || command === 'work-start') {
     const options = parseWorkOptions(args);
+    createWorkerProfile({ desktop: options.desktop ?? false });
     console.log(safeStatus(`Работа по ${options.source}: ${options.budgetMs === null ? 'без общего таймера' : `до ${options.budgetMs / 60_000} минут`}, ${options.maxTasks === 100 ? 'весь исходный план' : `до ${options.maxTasks} пунктов`}, до 3 попыток на пункт.`));
     if (command === 'work-start') {
       const state = await startBackground(options);
@@ -86,6 +91,7 @@ async function main([command, ...args]) {
     const db = await readTasks(WORK_DB);
     console.log(safeStatus(JSON.stringify({ service: await backgroundStatus(), controller: db.controller ?? null, tasks: db.tasks.map(task => ({
       id: task.id, status: task.status, attempts: task.attempts, text: task.work?.text,
+      target: task.target ?? 'current', waitingReason: task.waitingReason,
       verified: task.work?.verified, error: task.error, checks: task.report?.checks,
     })) }, null, 2)));
     return;
@@ -121,8 +127,9 @@ async function main([command, ...args]) {
     return;
   }
   if (command === 'add') {
-    const task = await addTask(args.join(' '));
-    return console.log(`Добавлено: ${task.id}\n${safeStatus(task.goal)}`);
+    const { goal, requirements } = parseTaskOptions(args);
+    const task = await addTask(goal, undefined, requirements);
+    return console.log(`Добавлено: ${task.id} (${task.status})\n${safeStatus(task.goal)}${task.waitingReason ? `\n${task.waitingReason.message}` : ''}`);
   }
   if (command === 'list' || command === 'show') {
     const { tasks } = await readTasks();
@@ -132,7 +139,11 @@ async function main([command, ...args]) {
       return console.log(safeStatus(JSON.stringify(task, null, 2)));
     }
     if (!tasks.length) return console.log('Очередь пуста.');
-    for (const task of tasks) console.log(`${task.id}  ${task.status.padEnd(11)} ${safeStatus(task.goal).replace(/\s+/g, ' ').slice(0, 100)}`);
+    for (const task of tasks) {
+      const route = evaluateTaskRoute(task, tasks);
+      const status = ['queued', 'waiting'].includes(task.status) ? route.eligible ? 'queued' : 'waiting' : task.status;
+      console.log(`${task.id}  ${status.padEnd(11)} [${task.target ?? 'current'}] ${safeStatus(task.goal).replace(/\s+/g, ' ').slice(0, 100)}${status === 'waiting' ? ` — ${route.message}` : ''}`);
+    }
     return;
   }
   if (command === 'recover-store') {
@@ -143,8 +154,10 @@ async function main([command, ...args]) {
     return console.log(`${task.id}  ${task.status}. Для продолжения выполните resume.`);
   }
   if (command === 'run' || command === 'resume') {
-    const result = await executeTask(args[0], command === 'resume', { handleSignals: true });
-    console.log(`Задача ${result.task.status}. Отчёт: ${path.relative(ROOT, result.outputFile)}`);
+    if (args.slice(1).some(argument => argument !== '--desktop')) throw new Error('run/resume: UUID задачи и необязательный --desktop.');
+    const result = await executeTask(args[0], command === 'resume', { handleSignals: true, desktop: args.includes('--desktop') });
+    console.log(`Задача ${result.task.status}.${result.outputFile ? ` Отчёт: ${path.relative(ROOT, result.outputFile)}` : ''}`);
+    if (result.task.waitingReason) console.log(safeStatus(result.task.waitingReason.message));
     if (result.task.error) console.error(safeStatus(result.task.error));
     process.exitCode = result.exitCode;
     return;

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { ROOT, newTask, readTasks, transaction } from '../store.mjs';
 import { createQueueController, QueueError } from '../queue-controller.mjs';
 import { safeStatus } from '../privacy.mjs';
+import { createWorkerProfile, evaluateTaskRoute, reconcileWaitingTasks, taskRequirements, validateDependencies } from '../routing.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']]]);
@@ -11,10 +12,16 @@ const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosnif
   'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'Cross-Origin-Resource-Policy': 'same-origin',
   'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" };
 
-function view(task, detail = false) {
-  const result = { id: task.id, goal: safeStatus(task.goal), status: task.status, attempts: task.attempts,
+function view(task, detail = false, tasks = [task], worker = createWorkerProfile()) {
+  const route = evaluateTaskRoute(task, tasks, worker);
+  let requirements;
+  try { requirements = taskRequirements(task); }
+  catch { requirements = { target: 'invalid', dependsOn: [] }; }
+  const pending = ['queued', 'waiting'].includes(task.status);
+  const result = { id: task.id, goal: safeStatus(task.goal), status: pending ? route.eligible ? 'queued' : 'waiting' : task.status, attempts: task.attempts,
+    ...requirements, route,
     createdAt: task.createdAt, updatedAt: task.updatedAt, hasSession: Boolean(task.sessionId),
-    canResume: ['failed', 'blocked', 'interrupted'].includes(task.status) && Boolean(task.sessionId) && task.attempts < 3,
+    canResume: route.eligible && ['failed', 'blocked', 'interrupted'].includes(task.status) && Boolean(task.sessionId) && task.attempts < 3,
     error: task.error ? safeStatus(task.error) : null,
     summary: task.report?.summary ? safeStatus(task.report.summary) : null,
     checksCount: task.report?.checks?.length ?? 0,
@@ -52,11 +59,12 @@ async function body(request, allowed) {
 
 export async function createAgentServer({ root = ROOT, dataDir = path.join(root, '.skai-agent'), dbFile = path.join(dataDir, 'tasks.json'),
   workDbFile = path.join(dataDir, 'work', 'tasks.json'), port = 0, executionEnabled = true, command, prefixArgs = [],
-  timeoutMs = 600_000, graceMs = 500 } = {}) {
+  timeoutMs = 600_000, graceMs = 500, desktop = false, worker = createWorkerProfile({ desktop }) } = {}) {
+  worker = createWorkerProfile(worker);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Порт должен быть целым числом от 0 до 65535.');
   const files = new Map(await Promise.all([...assets].map(async ([url, [name, type]]) =>
     [url, { content: await readFile(path.join(import.meta.dirname, 'public', name)), type }])));
-  const queue = createQueueController({ root, dataDir, dbFile, command, prefixArgs, timeoutMs, graceMs });
+  const queue = createQueueController({ root, dataDir, dbFile, command, prefixArgs, timeoutMs, graceMs, worker });
   let origin;
   let closing = false;
   const server = http.createServer({ maxHeaderSize: 8192, requestTimeout: 10_000, headersTimeout: 10_000 }, async (request, response) => {
@@ -81,40 +89,44 @@ export async function createAgentServer({ root = ROOT, dataDir = path.join(root,
         const [db, work] = await Promise.all([readTasks(dbFile), readTasks(workDbFile)]);
         const currentIds = work.controller?.taskIds ?? [];
         const batch = db.batch;
-        return send(200, { project: path.basename(root), executionEnabled, ownedRun: queue.active,
-          controllerError: queue.error, tasks: db.tasks.map(task => view(task)),
+        const tasks = db.tasks.map(task => view(task, false, db.tasks, worker));
+        return send(200, { project: path.basename(root), executionEnabled, ownedRun: queue.active, worker,
+          controllerError: queue.error, tasks, runnableCount: tasks.filter(task => task.status === 'queued').length,
           batch: batch ? { status: batch.status, taskIds: batch.taskIds, completed: batch.completed,
-            activeTaskId: batch.activeTaskId, startedAt: batch.startedAt, finishedAt: batch.finishedAt,
+            activeTaskId: batch.activeTaskId, startedAt: batch.startedAt, finishedAt: batch.finishedAt, waiting: batch.waiting ?? 0,
             error: batch.error ? safeStatus(batch.error) : null } : null,
           plan: { status: work.controller?.status ?? 'idle', reason: work.controller?.reason ? safeStatus(work.controller.reason) : null,
-            tasks: work.tasks.filter(task => currentIds.includes(task.id)).map(task => view(task)) } });
+            tasks: work.tasks.filter(task => currentIds.includes(task.id)).map(task => view(task, false, work.tasks, worker)) } });
       }
       if (url.pathname === '/api/tasks' && request.method === 'POST') {
-        const input = await body(request, ['goal', 'requestId']);
+        const input = await body(request, ['goal', 'requestId', 'target', 'dependsOn']);
         if (typeof input.goal !== 'string' || !UUID.test(input.requestId ?? '')) throw new QueueError('Нужны текст задачи и идентификатор отправки.', 400);
         if (safeStatus(input.goal) !== input.goal) throw new QueueError('Текст похож на пароль или ключ. Уберите секрет перед сохранением.', 400);
         let task;
-        try { task = newTask(input.goal); } catch (error) { throw new QueueError(error.message, 400); }
+        try { task = newTask(input.goal, input); } catch (error) { throw new QueueError(error.message, 400); }
         const saved = await transaction(dbFile, db => {
           const previous = db.tasks.find(item => item.submissionId === input.requestId);
           if (previous) {
-            if (previous.goal !== task.goal) throw new QueueError('Этот идентификатор отправки уже использован для другого текста.');
-            return previous;
+            if (previous.goal !== task.goal || JSON.stringify(taskRequirements(previous)) !== JSON.stringify(taskRequirements(task))) throw new QueueError('Этот идентификатор отправки уже использован для другой задачи или требований.');
+            return view(previous, true, db.tasks, worker);
           }
+          try { validateDependencies(task, db.tasks); } catch (error) { throw new QueueError(error.message, 400); }
           task.submissionId = input.requestId;
           db.tasks.push(task);
-          return task;
+          reconcileWaitingTasks(db, worker);
+          return view(task, true, db.tasks, worker);
         });
-        return send(201, { task: view(saved, true) });
+        return send(201, { task: saved });
       }
       const match = /^\/api\/tasks\/([a-f0-9-]+)(?:\/(resume))?$/i.exec(url.pathname);
       if (match && UUID.test(match[1])) {
         if (request.method === 'GET' && !match[2]) {
           const source = url.searchParams.get('source') ?? 'queue';
           if (!['queue', 'plan'].includes(source)) throw new QueueError('Неизвестная очередь.', 400);
-          const task = (await readTasks(source === 'plan' ? workDbFile : dbFile)).tasks.find(item => item.id === match[1]);
+          const db = await readTasks(source === 'plan' ? workDbFile : dbFile);
+          const task = db.tasks.find(item => item.id === match[1]);
           if (!task) throw new QueueError('Задача не найдена.', 404);
-          return send(200, { task: view(task, true) });
+          return send(200, { task: view(task, true, db.tasks, worker) });
         }
         if (request.method === 'POST' && match[2] === 'resume') {
           await body(request, []);

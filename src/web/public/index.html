@@ -35,11 +35,13 @@
         <form id="composer" class="composer">
           <label for="goal">Новая задача</label>
           <textarea id="goal" name="goal" rows="3" minlength="5" maxlength="4000" placeholder="Какой результат нужен? Например: добавить проверку сохранения настроек…" required></textarea>
+          <div class="task-options"><label for="target">Где выполнять<select id="target" name="target"><option value="current">Текущая среда</option><option value="windows">Windows</option><option value="windows-gui">Windows с рабочим столом</option></select></label><label for="dependency">После задачи<select id="dependency" name="dependency"><option value="">Без зависимости</option></select></label></div>
           <div class="composer-bottom"><span>Без паролей и ключей · <span id="char-count">0</span>/4000</span><button id="add-task" type="submit" class="primary">Добавить в очередь <span aria-hidden="true">+</span></button></div>
         </form>
 
         <div id="notice" role="status" aria-live="polite" hidden></div>
         <p id="execution-note" class="paused-note" hidden>Выполнение отложено. Задачи можно сохранять и просматривать; запуск исполнителя для этой панели приостановлен.</p>
+        <p id="worker-note" class="worker-note"></p>
         <section id="batch-panel" class="batch-panel" hidden><div><span id="batch-label"></span><small id="batch-detail"></small></div><progress id="batch-progress" max="1" value="0" aria-label="Прогресс запуска"></progress></section>
         <section class="tasks-section" aria-labelledby="tasks-title">
           <div class="list-heading"><h2 id="tasks-title">Очередь</h2><div class="actions"><button id="recover" class="quiet" hidden>Восстановить после сбоя</button><button id="stop" class="danger" hidden>Остановить</button><button id="run" class="primary" disabled>Выполнить очередь <span class="play-symbol" aria-hidden="true"></span></button></div></div>
@@ -54,7 +56,7 @@
 
   <dialog id="details" aria-labelledby="detail-title">
     <header class="dialog-header"><span id="detail-status" class="status"></span><button id="close-details" class="icon-button" aria-label="Закрыть сведения">✕</button></header>
-    <div class="dialog-body"><h2 id="detail-title"></h2><p id="detail-meta" class="muted"></p><p id="detail-error" class="error-box" hidden></p><section><h3>Результат</h3><p id="detail-summary"></p></section><section id="file-acceptance" hidden><h3>Файловая приёмка</h3><p id="acceptance-result"></p><code id="acceptance-file"></code></section><section><h3>Проверки</h3><ul id="detail-checks"></ul></section><section><h3>Изменённые файлы</h3><ul id="detail-files"></ul></section><section id="blockers-section" hidden><h3>Блокеры</h3><ul id="detail-blockers"></ul></section><p id="report-note" class="muted">Результат и проверки сообщает исполнитель. Отдельная приёмка файла отмечается явно.</p></div>
+    <div class="dialog-body"><h2 id="detail-title"></h2><p id="detail-meta" class="muted"></p><p id="detail-requirements" class="muted"></p><p id="detail-error" class="error-box" hidden></p><section id="dependencies-section" hidden><h3>После задач</h3><ul id="detail-dependencies"></ul></section><section><h3>Результат</h3><p id="detail-summary"></p></section><section id="file-acceptance" hidden><h3>Файловая приёмка</h3><p id="acceptance-result"></p><code id="acceptance-file"></code></section><section><h3>Проверки</h3><ul id="detail-checks"></ul></section><section><h3>Изменённые файлы</h3><ul id="detail-files"></ul></section><section id="blockers-section" hidden><h3>Блокеры</h3><ul id="detail-blockers"></ul></section><p id="report-note" class="muted">Результат и проверки сообщает исполнитель. Отдельная приёмка файла отмечается явно.</p></div>
     <footer class="dialog-footer"><span id="detail-source" class="muted"></span><button id="resume" class="primary" hidden>Продолжить сохранённую задачу</button></footer>
   </dialog>
 </body>

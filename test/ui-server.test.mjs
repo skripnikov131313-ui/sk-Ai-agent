@@ -86,6 +86,83 @@ test('task submission persists and concurrent retries cannot create duplicate jo
   assert.equal((await add('Совсем другой результат', key)).response.status, 409);
 });
 
+test('requirements are immutable, normalized and part of submission idempotency; dependencies must be existing queue tasks', async t => {
+  const { api, dbFile } = await setup(t, 'completed', { worker: { platform: 'linux', desktop: false } });
+  const parent = (await api('/api/tasks', { goal: 'Подготовить данные для зависимой задачи', requestId: randomUUID() })).body.task;
+  const requestId = randomUUID();
+  const input = { goal: 'Проверить окно после подготовки', target: 'windows-gui', dependsOn: [parent.id], requestId };
+  const first = await api('/api/tasks', input);
+  assert.equal(first.response.status, 201);
+  assert.equal(first.body.task.status, 'waiting');
+  assert.equal(first.body.task.route.code, 'windows');
+  const repeated = await api('/api/tasks', { ...input, dependsOn: [parent.id.toUpperCase(), parent.id] });
+  assert.equal(repeated.body.task.id, first.body.task.id);
+  for (const change of [{ target: 'current' }, { dependsOn: [] }]) assert.equal((await api('/api/tasks', { ...input, ...change })).response.status, 409);
+  for (const invalid of [{ target: 'remote' }, { dependsOn: [randomUUID()] }, { dependsOn: [7] }, { desktop: true }, { worker: { platform: 'win32' } }]) {
+    assert.equal((await api('/api/tasks', { goal: 'Отклоняемая задача с неверными требованиями', requestId: randomUUID(), ...invalid })).response.status, 400);
+  }
+  assert.equal((await readTasks(dbFile)).tasks.length, 2);
+  assert.equal((await api(`/api/tasks/${first.body.task.id}`, { target: 'current' })).response.status, 404);
+});
+
+test('a batch skips unavailable Windows work, unlocks dependencies and completes all eligible tasks without spending waiting attempts', async t => {
+  const { api, dbFile } = await setup(t, 'completed', { worker: { platform: 'linux', desktop: false } });
+  const add = async (goal, options = {}) => (await api('/api/tasks', { goal, requestId: randomUUID(), ...options })).body.task;
+  const win = await add('Проверить Win32 в соответствующей среде', { target: 'windows' });
+  const parent = await add('Подготовить данные для следующего шага');
+  const child = await add('Использовать результат первого шага', { dependsOn: [parent.id] });
+  const deferred = await add('Проверить результат Windows задачи', { dependsOn: [win.id] });
+  // Dependency order does not depend on the physical JSON array order.
+  await transaction(dbFile, db => { db.tasks.reverse(); });
+  const before = (await api('/api/state')).body;
+  assert.equal(before.runnableCount, 1);
+  assert.equal(before.worker.platform, 'linux');
+  assert.equal((await api('/api/queue/start', {})).response.status, 202);
+  await eventually(async () => (await readTasks(dbFile)).batch?.status === 'waiting');
+  const db = await readTasks(dbFile);
+  assert.equal(db.batch.completed, 2);
+  assert.equal(db.batch.waiting, 2);
+  for (const id of [parent.id, child.id]) assert.equal(db.tasks.find(task => task.id === id).status, 'completed');
+  for (const id of [win.id, deferred.id]) {
+    assert.equal(db.tasks.find(task => task.id === id).status, 'waiting');
+    assert.equal(db.tasks.find(task => task.id === id).attempts, 0);
+  }
+  const after = (await api('/api/state')).body;
+  assert.equal(after.runnableCount, 0);
+  assert.equal(after.tasks.find(task => task.id === deferred.id).route.code, 'dependency');
+  assert.equal((await api('/api/queue/start', {})).response.status, 202);
+  await eventually(async () => !(await api('/api/state')).body.ownedRun);
+  assert.equal((await readTasks(dbFile)).batch.completed, 0);
+});
+
+test('an all-waiting queue releases its lock without spawning and rejects incompatible saved-session resume', async t => {
+  const { api, dbFile, root } = await setup(t, 'completed', { command: 'must-never-start', worker: { platform: 'linux', desktop: false } });
+  const task = (await api('/api/tasks', { goal: 'Задача исключительно для Windows', target: 'windows', requestId: randomUUID() })).body.task;
+  await api('/api/queue/start', {});
+  await eventually(async () => !(await api('/api/state')).body.ownedRun);
+  assert.equal((await readTasks(dbFile)).batch.status, 'waiting');
+  assert.equal((await readTasks(dbFile)).tasks[0].attempts, 0);
+  await assert.rejects(() => readFile(path.join(root, 'invocation.json')), { code: 'ENOENT' });
+  await assert.rejects(() => readFile(`${dbFile}.batch.lock`), { code: 'ENOENT' });
+  await updateTask(task.id, { status: 'interrupted', attempts: 1, sessionId: randomUUID() }, dbFile);
+  assert.equal((await api(`/api/tasks/${task.id}`)).body.task.canResume, false);
+  assert.equal((await api(`/api/tasks/${task.id}/resume`, {})).response.status, 409);
+  assert.equal((await readTasks(dbFile)).tasks[0].attempts, 1);
+  assert.equal((await readTasks(dbFile)).tasks[0].status, 'interrupted');
+});
+
+test('damaged requirements are displayed as waiting without returning their arbitrary raw values', async t => {
+  const { add, api, dbFile } = await setup(t);
+  const task = (await add('Задача с повреждёнными требованиями')).body.task;
+  await updateTask(task.id, { target: 'SYNTHETIC_PRIVATE_REQUIREMENT', dependsOn: ['SYNTHETIC_PRIVATE_DEPENDENCY'] }, dbFile);
+  const detail = (await api(`/api/tasks/${task.id}`)).body.task;
+  assert.equal(detail.status, 'waiting');
+  assert.equal(detail.route.code, 'invalid-requirements');
+  assert.equal(detail.target, 'invalid');
+  assert.deepEqual(detail.dependsOn, []);
+  assert.doesNotMatch(JSON.stringify((await api('/api/state')).body), /SYNTHETIC_PRIVATE/);
+});
+
 test('a queue launch advances automatically and excludes tasks submitted after its snapshot', async t => {
   const { add, api, dbFile, root } = await setup(t, 'slow');
   await add('Первая проверка протокола'); await add('Вторая проверка протокола');

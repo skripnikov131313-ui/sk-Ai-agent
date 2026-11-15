@@ -7,7 +7,8 @@ const root = args[args.indexOf('--cd') + 1];
 const output = args[args.indexOf('--output-last-message') + 1];
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
-const text = /\n(CASE=[^\n]+)\n/.exec(prompt)?.[1];
+const planText = /\n((?:\[(?:windows|windows-gui)\] )?CASE=[^\n]+)\n/.exec(prompt)?.[1];
+const text = planText?.replace(/^\[[^\]]+\] /, '');
 if (!text) throw new Error('Missing fixture case');
 const historyFile = path.join(root, 'invocations.jsonl');
 let history = '';
@@ -24,7 +25,7 @@ if (text === 'CASE=hold' || (text === 'CASE=timeout' && attempt === 1)) {
   const incomplete = text === 'CASE=incomplete' || (text === 'CASE=repair' && attempt === 1);
   const planFile = path.join(root, 'PLAN.md');
   let plan = await readFile(planFile, 'utf8');
-  if (!blocked && !failed && !incomplete) plan = plan.replace(`- [ ] ${text}`, `- [x] ${text}`);
+  if (!blocked && !failed && !incomplete) plan = plan.replace(`- [ ] ${planText}`, `- [x] ${planText}`);
   if (text === 'CASE=grow') plan += '\n- [ ] CASE=unplanned\n';
   await writeFile(planFile, plan);
   await writeFile(output, JSON.stringify({ status: blocked ? 'blocked' : failed ? 'failed' : 'completed',

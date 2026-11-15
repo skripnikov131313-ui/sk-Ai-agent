@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { DATA_DIR, readTasks, updateTask } from '../src/store.mjs';
 import { parsePlan, work } from '../src/work.mjs';
 import { parseWorkOptions } from '../src/work-options.mjs';
+import { createWorkerProfile } from '../src/routing.mjs';
 
 const fixture = fileURLToPath(new URL('./fixtures/work-codex.mjs', import.meta.url));
 
@@ -54,7 +55,48 @@ test('CLI limits are optional and an explicit budget can exceed four hours', () 
   assert.equal(parseWorkOptions([]).maxTasks, 100);
   assert.equal(parseWorkOptions(['--minutes', '1440']).budgetMs, 86_400_000);
   assert.equal(parseWorkOptions(['PLAN.md', '--max-tasks', '2']).maxTasks, 2);
+  assert.equal(parseWorkOptions(['--desktop']).desktop, true);
   for (const value of ['0', '-1', 'Infinity', '1.2', 'NaN']) assert.throws(() => parseWorkOptions(['--minutes', value]), /--minutes/);
+});
+
+test('tagged Windows plan items wait without attempts while portable items finish, then resume on a matching fixture profile', async t => {
+  const options = await setup(t, []);
+  await writeFile(path.join(options.root, 'PLAN.md'), '# Plan\n\n- [ ] [windows] CASE=native\n- [ ] [windows-gui] CASE=desktop\n- [ ] CASE=portable\n');
+  const linux = createWorkerProfile({ platform: 'linux' });
+  const first = await work({ ...options, worker: linux });
+  assert.equal(first.status, 'waiting');
+  assert.equal(first.exitCode, 3);
+  assert.deepEqual(first.tasks.map(task => task.status), ['waiting', 'waiting', 'completed']);
+  assert.deepEqual(first.tasks.map(task => task.attempts), [0, 0, 1]);
+  assert.deepEqual((await invocations(options.root)).map(item => item.text), ['CASE=portable']);
+  await work({ ...options, worker: linux });
+  assert.equal((await invocations(options.root)).length, 1);
+  // These injected profiles test dispatch, not an actual Windows desktop.
+  const second = await work({ ...options, worker: createWorkerProfile({ platform: 'win32' }) });
+  assert.equal(second.status, 'waiting');
+  assert.deepEqual(second.tasks.map(task => task.status), ['completed', 'waiting']);
+  const third = await work({ ...options, worker: createWorkerProfile({ platform: 'win32', desktop: true }) });
+  assert.equal(third.status, 'completed');
+  assert.equal(third.tasks[0].work.verified, true);
+  assert.deepEqual((await invocations(options.root)).map(item => item.text), ['CASE=portable', 'CASE=native', 'CASE=desktop']);
+  assert.match(await readFile(path.join(options.root, 'PLAN.md'), 'utf8'), /\[x\] \[windows-gui\] CASE=desktop/);
+});
+
+test('a plan containing only unavailable items stops waiting without starting an executable or holding its work lock', async t => {
+  const options = await setup(t, []);
+  await writeFile(path.join(options.root, 'PLAN.md'), '# Plan\n- [ ] [windows] CASE=native\n');
+  const result = await work({ ...options, command: 'must-not-start', worker: { platform: 'linux', desktop: false } });
+  assert.equal(result.status, 'waiting');
+  assert.equal(result.tasks[0].attempts, 0);
+  assert.equal((await readTasks(options.dbFile)).controller.pid, null);
+  await assert.rejects(() => readFile(`${options.dbFile}.work.lock`), { code: 'ENOENT' });
+  assert.equal((await invocations(options.root)).length, 0);
+  const controller = new AbortController();
+  controller.abort();
+  const interrupted = await work({ ...options, command: 'must-not-start', signal: controller.signal, worker: { platform: 'linux', desktop: false } });
+  assert.equal(interrupted.status, 'interrupted');
+  assert.equal(interrupted.exitCode, 130);
+  assert.equal(interrupted.tasks[0].attempts, 0);
 });
 
 test('an unverified success is resumed automatically before advancing', async t => {

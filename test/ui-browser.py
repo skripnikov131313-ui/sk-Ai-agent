@@ -73,6 +73,35 @@ def main():
             page.keyboard.press("Escape")
             expect(page.locator("#details")).not_to_be_visible()
 
+            page.locator("#target").select_option("windows-gui")
+            page.reload()
+            expect(page.locator("#target")).to_have_value("windows-gui")
+            add("Тест маршрутизации: окно ожидает Windows с рабочим столом")
+            waiting_card = page.locator(".task").filter(has_text="окно ожидает Windows")
+            expect(waiting_card).to_contain_text("Задаче нужен Windows")
+            expect(waiting_card).to_contain_text("Попыток: 0/3")
+            expect(page.locator("#run")).to_be_disabled()
+            windows_id = waiting_card.get_attribute("data-task-id")
+            page.locator("#target").select_option("current")
+            page.locator("#dependency").select_option(windows_id)
+            page.locator("#goal").fill("Тест маршрутизации: проверить результат окна")
+            page.reload()
+            expect(page.locator("#dependency")).to_have_value(windows_id)
+            add("Тест маршрутизации: проверить результат окна")
+            expect(page.locator("#run")).to_be_disabled()
+            add("Тест маршрутизации: независимая подготовка данных")
+            parent_id = page.locator(".task").filter(has_text="независимая подготовка").get_attribute("data-task-id")
+            page.locator("#dependency").select_option(parent_id)
+            add("Тест маршрутизации: следующий шаг после подготовки")
+            page.locator("#run").click()
+            expect(page.locator("#stat-completed")).to_have_text("4", timeout=15000)
+            expect(page.locator("#stat-queued")).to_have_text("2")
+            expect(waiting_card).to_contain_text("Попыток: 0/3")
+            waiting_card.click()
+            expect(page.locator("#detail-requirements")).to_contain_text("Windows с рабочим столом")
+            expect(page.locator("#detail-error")).to_contain_text("Задаче нужен Windows")
+            page.keyboard.press("Escape")
+
             draft = "Тест: черновик переживает перезагрузку страницы"
             page.locator("#goal").fill(draft)
             page.reload()
@@ -81,7 +110,7 @@ def main():
             add("Тест интерфейса: задача после блокера остаётся в очереди")
             page.locator("#run").click()
             expect(page.locator("#stat-attention")).to_have_text("1", timeout=15000)
-            expect(page.locator("#stat-queued")).to_have_text("1")
+            expect(page.locator("#stat-queued")).to_have_text("3")
             if output:
                 page.screenshot(path=str(output / "agent-ui-desktop.png"), full_page=True)
             page.set_viewport_size({"width": 390, "height": 844})
@@ -98,7 +127,7 @@ def main():
             expect(page.locator("#composer")).not_to_be_visible()
             assert not errors, errors
             browser.close()
-        print("PASS: Chromium desktop/mobile, queue execution, reports, blockers, draft persistence and escaped task content. Executor: fixture; no model calls.")
+        print("PASS: Chromium desktop/mobile, routing, dependencies, queue execution, reports, blockers, draft persistence and escaped task content. Executor: fixture; no model calls.")
     finally:
         process.terminate()
         try:
