@@ -38,6 +38,25 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & node src/cli.mjs list
           exit $LASTEXITCODE
+      - name: Test summary
+        if: always()
+        shell: pwsh
+        run: |
+          $file = '.skai-agent/ci/results.xml'
+          if (-not (Test-Path $file)) { throw 'Current test results are missing' }
+          [xml]$report = Get-Content -Raw $file
+          $cases = @($report.SelectNodes('//testcase'))
+          $failed = @($cases | Where-Object { $_.SelectSingleNode('failure') -or $_.SelectSingleNode('error') })
+          $skipped = @($cases | Where-Object { $_.SelectSingleNode('skipped') })
+          $summary = @("## Tests on $env:RUNNER_OS", '', "Cases: $($cases.Count); failures: $($failed.Count); skipped: $($skipped.Count)")
+          foreach ($case in $failed) {
+            $failure = $case.SelectSingleNode('failure')
+            if (-not $failure) { $failure = $case.SelectSingleNode('error') }
+            $details = $failure.InnerText
+            if ($details.Length -gt 8000) { $details = $details.Substring(0, 8000) }
+            $summary += @('', "### $($case.name)", '```text', $details.Replace('```', '~~~'), '```')
+          }
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
       - name: Test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
