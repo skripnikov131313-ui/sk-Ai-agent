@@ -125,9 +125,27 @@ def main():
             page.get_by_role("button", name="Закрыть сведения").click()
             page.get_by_role("button", name="Рабочий план").click()
             expect(page.locator("#composer")).not_to_be_visible()
+            page.get_by_role("button", name="Память").click()
+            expect(page.locator("#memory-panel")).to_be_visible()
+            expect(page.locator("#memory-lessons article")).to_have_count(4)
+            expect(page.locator("#memory-preferences")).to_contain_text("Не сообщай отдельно")
+            expect(page.locator("#memory-metrics strong").nth(0)).to_have_text("8")
+            expect(page.locator("#memory-metrics strong").nth(1)).to_have_text("4")
+            expect(page.locator("#memory-metrics strong").nth(3)).to_have_text("0")
+            assert page.locator("#memory-lessons img").count() == 0
+            assert page.evaluate("window.memoryInjected === undefined")
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            if output:
+                page.screenshot(path=str(output / "agent-memory-mobile.png"), full_page=True)
+            page.set_viewport_size({"width": 1280, "height": 1000})
+            if output:
+                page.screenshot(path=str(output / "agent-memory-desktop.png"), full_page=True)
+            page.get_by_role("button", name="Мои задачи").click()
+            expect(page.locator("#composer")).to_be_visible()
+            expect(page.locator("#stat-completed")).to_have_text("4")
             assert not errors, errors
             browser.close()
-        print("PASS: Chromium desktop/mobile, routing, dependencies, queue execution, reports, blockers, draft persistence and escaped task content. Executor: fixture; no model calls.")
+        print("PASS: Chromium desktop/mobile, project memory, metrics, routing, dependencies, queue execution, reports, blockers, draft persistence and escaped content. Executor: fixture; no model calls.")
     finally:
         process.terminate()
         try:

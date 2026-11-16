@@ -5,6 +5,7 @@ import { ROOT, newTask, readTasks, transaction } from '../store.mjs';
 import { createQueueController, QueueError } from '../queue-controller.mjs';
 import { safeStatus } from '../privacy.mjs';
 import { createWorkerProfile, evaluateTaskRoute, reconcileWaitingTasks, taskRequirements, validateDependencies } from '../routing.mjs';
+import { MemoryError, readProjectMemory, summarizeOutcomes } from '../memory.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']]]);
@@ -85,6 +86,10 @@ export async function createAgentServer({ root = ROOT, dataDir = path.join(root,
       if (asset && request.method === 'GET') return send(200, asset.content, asset.type);
       if (!url.pathname.startsWith('/api/') || request.headers['x-skai-client'] !== 'operator-ui') return send(403, { error: 'Разрешены запросы панели Agent.' });
       if (request.method === 'OPTIONS') return send(403, { error: 'Cross-origin запросы запрещены.' });
+      if (url.pathname === '/api/memory' && request.method === 'GET') {
+        const [memory, db, plan] = await Promise.all([readProjectMemory(root), readTasks(dbFile), readTasks(workDbFile)]);
+        return send(200, { ...memory, outcomes: { queue: summarizeOutcomes(db.tasks), plan: summarizeOutcomes(plan.tasks) } });
+      }
       if (url.pathname === '/api/state' && request.method === 'GET') {
         const [db, work] = await Promise.all([readTasks(dbFile), readTasks(workDbFile)]);
         const currentIds = work.controller?.taskIds ?? [];
@@ -149,7 +154,7 @@ export async function createAgentServer({ root = ROOT, dataDir = path.join(root,
       return send(404, { error: 'Адрес не найден.' });
     } catch (error) {
       if (response.headersSent || response.destroyed) return;
-      const status = error instanceof QueueError ? error.status : 500;
+      const status = error instanceof QueueError ? error.status : error instanceof MemoryError ? 422 : 500;
       send(status, { error: status < 500 ? safeStatus(error.message) : 'Не удалось прочитать или сохранить состояние. Существующие данные сохранены.' });
     }
   });

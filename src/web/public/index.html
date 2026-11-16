@@ -16,6 +16,7 @@
       <nav aria-label="Разделы">
         <button class="nav-item active" data-source="queue"><span class="nav-icon">▤</span> Мои задачи <span id="queue-count" class="nav-count">0</span></button>
         <button class="nav-item" data-source="plan"><span class="nav-icon">▦</span> Рабочий план <span id="plan-count" class="nav-count">0</span></button>
+        <button class="nav-item" data-source="memory"><span class="nav-icon">◇</span> Память <span id="memory-count" class="nav-count">—</span></button>
       </nav>
       <div class="sidebar-bottom"><span class="mini-mark">/</span><p>Одна задача.<br>Понятный результат.</p><small id="project-name">Рабочая среда</small></div>
     </aside>
@@ -25,7 +26,7 @@
       <div class="content">
         <section class="heading"><div><p class="eyebrow">ВАШ AGENT</p><h1 id="page-title">От задачи к результату.</h1><p id="page-description">Опишите, что нужно сделать. Прогресс и проверки будут здесь.</p></div><span class="route-badge">Codex CLI</span></section>
 
-        <div class="stats" aria-label="Состояние задач">
+        <div id="task-stats" class="stats" aria-label="Состояние задач">
           <div><span class="stat-label">В работе</span><strong id="stat-running">0</strong><span class="stat-dot blue"></span></div>
           <div><span class="stat-label">Ожидают</span><strong id="stat-queued">0</strong><span class="stat-dot gray"></span></div>
           <div><span class="stat-label">Нужно внимание</span><strong id="stat-attention">0</strong><span class="stat-dot amber"></span></div>
@@ -49,7 +50,16 @@
           <div id="task-list" class="task-list" aria-live="polite"></div>
           <div id="empty" class="empty"><span class="empty-icon">↗</span><h3>Здесь начинается работа</h3><p>Добавьте первую задачу. Она сохранится в очереди этой рабочей среды.</p></div>
         </section>
-        <footer class="page-footer"><span>Очередь сохраняется автоматически</span><span id="updated">—</span></footer>
+        <section id="memory-panel" class="memory-panel" aria-label="Память проекта" hidden>
+          <p id="memory-error" class="error-box" role="alert" hidden></p>
+          <div id="memory-metrics" class="memory-metrics"></div>
+          <p class="muted memory-explanation">Завершение задачи сообщает исполнитель. Проверка контрольного файла учитывается отдельно. Это история текущих очередей, а не оценка качества модели.</p>
+          <h2>Как со мной работать</h2><ul id="memory-preferences" class="memory-preferences"></ul>
+          <div class="list-heading"><h2>Проверенные приёмы</h2><span id="memory-summary" class="muted">Загрузка…</span></div>
+          <div id="memory-lessons" class="memory-lessons"></div>
+          <p id="memory-empty" class="muted" hidden>В этом проекте пока нет записей памяти. Задачи используют обычный контекст проекта.</p>
+        </section>
+        <footer class="page-footer"><span id="storage-note">Очередь сохраняется автоматически</span><span id="updated">—</span></footer>
       </div>
     </main>
   </div>

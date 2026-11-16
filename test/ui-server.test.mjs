@@ -76,6 +76,51 @@ test('the actual CLI starts a paused panel and exits after termination', async t
   assert.equal((await response.json()).executionEnabled, false);
 });
 
+test('project memory exposes checked recipes and aggregate outcomes without task or session payloads', async t => {
+  const { root, api, dbFile, add } = await setup(t);
+  assert.equal((await api('/api/memory')).body.available, false);
+  const memoryFile = fileURLToPath(new URL('../MEMORY.json', import.meta.url));
+  await writeFile(path.join(root, 'MEMORY.json'), await readFile(memoryFile));
+  const task = (await add('Задача для метрики проектной памяти')).body.task;
+  await updateTask(task.id, { status: 'completed', attempts: 2, sessionId: 'SYNTHETIC_PRIVATE_SESSION',
+    goal: 'SYNTHETIC_PRIVATE_GOAL', acceptance: { kind: 'smoke-file', verified: true } }, dbFile);
+  const result = await api('/api/memory');
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.available, true);
+  assert.ok(result.body.lessons.some(item => item.id === 'blockers-override-completion'));
+  assert.ok(result.body.preferences.some(item => item.id === 'quiet-recovery'));
+  assert.equal(result.body.outcomes.queue.total, 1);
+  assert.equal(result.body.outcomes.queue.extraAttempts, 1);
+  assert.equal(result.body.outcomes.queue.verifiedFiles, 1);
+  assert.equal(result.body.outcomes.plan.total, 0);
+  assert.doesNotMatch(JSON.stringify(result.body), /SYNTHETIC_PRIVATE|sessionId|workerPid/);
+  assert.equal((await api('/api/memory', undefined, { 'X-SkAi-Client': '' })).response.status, 403);
+  assert.equal((await api('/api/memory', {})).response.status, 404);
+});
+
+test('invalid memory remains intact and recoverable without spending attempts or breaking queue inspection', async t => {
+  const { root, api, add, dbFile } = await setup(t);
+  const file = path.join(root, 'MEMORY.json');
+  const broken = '{SYNTHETIC_PRIVATE_MEMORY';
+  await writeFile(file, broken);
+  const result = await api('/api/memory');
+  assert.equal(result.response.status, 422);
+  assert.doesNotMatch(JSON.stringify(result.body), /SYNTHETIC_PRIVATE/);
+  await add('Задача после исправления памяти проекта');
+  assert.equal((await api('/api/state')).response.status, 200);
+  await api('/api/queue/start', {});
+  await eventually(async () => !(await api('/api/state')).body.ownedRun);
+  assert.equal((await readTasks(dbFile)).batch.status, 'failed');
+  assert.equal((await readTasks(dbFile)).tasks[0].attempts, 0);
+  assert.equal(await readFile(file, 'utf8'), broken);
+  await assert.rejects(() => readFile(path.join(root, 'invocation.json')), { code: 'ENOENT' });
+  await writeFile(file, await readFile(fileURLToPath(new URL('../MEMORY.json', import.meta.url))));
+  await api('/api/queue/start', {});
+  await eventually(async () => !(await api('/api/state')).body.ownedRun);
+  assert.equal((await readTasks(dbFile)).tasks[0].status, 'completed');
+  assert.equal((await readTasks(dbFile)).tasks[0].attempts, 1);
+});
+
 test('task submission persists and concurrent retries cannot create duplicate jobs', async t => {
   const { add, dbFile } = await setup(t);
   const key = randomUUID();

@@ -10,6 +10,9 @@ let listKey = '';
 let detailId = null;
 let detailUpdated = null;
 let posting = false;
+let memorySnapshot = null;
+let memoryError = null;
+let memoryKey = '';
 let lastAttemptPayload = null;
 let dependency = '';
 let submissionId;
@@ -51,8 +54,52 @@ function selectedTasks() { return source === 'plan' ? snapshot?.plan.tasks ?? []
 function node(tag, className, text) { const element = document.createElement(tag); if (className) element.className = className; if (text !== undefined) element.textContent = text; return element; }
 function detailVersion(task) { return JSON.stringify([task.updatedAt, task.status, task.route, task.canResume]); }
 
+function renderMemory() {
+  const key = JSON.stringify([memorySnapshot, memoryError]);
+  if (key === memoryKey) return;
+  memoryKey = key;
+  $('memory-error').hidden = !memoryError; $('memory-error').textContent = memoryError || '';
+  if (!memorySnapshot) {
+    $('memory-summary').textContent = memoryError ? 'Память недоступна' : 'Загрузка…';
+    $('memory-count').textContent = '—'; $('memory-empty').hidden = true;
+    for (const id of ['memory-metrics', 'memory-preferences', 'memory-lessons']) $(id).replaceChildren();
+    return;
+  }
+  $('memory-count').textContent = memorySnapshot.lessons.length;
+  $('memory-summary').textContent = `${memorySnapshot.lessons.length} приёмов · контекст следующей задачи`;
+  $('memory-empty').hidden = memorySnapshot.available;
+  const { queue, plan } = memorySnapshot.outcomes;
+  const metrics = [
+    ['Задач в истории', queue.total + plan.total],
+    ['Завершено без блокеров', queue.byStatus.completed + plan.byStatus.completed - queue.contradictoryReports - plan.contradictoryReports],
+    ['Дополнительных попыток', queue.extraAttempts + plan.extraAttempts],
+    ['Файл проверен Agent', queue.verifiedFiles + plan.verifiedFiles],
+  ];
+  $('memory-metrics').replaceChildren(...metrics.map(([label, value]) => {
+    const card = node('div'); card.append(node('span', '', label), node('strong', '', value)); return card;
+  }));
+  $('memory-preferences').replaceChildren(...memorySnapshot.preferences.map(item => {
+    const li = node('li'); li.append(node('p', '', item.rule), node('small', 'muted', item.source)); return li;
+  }));
+  if (!memorySnapshot.preferences.length) $('memory-preferences').append(node('li', 'muted', 'Предпочтения пока не записаны.'));
+  $('memory-lessons').replaceChildren(...memorySnapshot.lessons.map(lesson => {
+    const card = node('article', 'memory-lesson');
+    card.append(node('h3', '', lesson.title), node('p', 'muted', lesson.problem), node('p', '', lesson.approach));
+    const checks = node('div', 'memory-checks'); checks.append(node('span', '', 'Проверки:'));
+    for (const check of lesson.checks) checks.append(node('code', '', check));
+    card.append(checks); return card;
+  }));
+}
+
 function render() {
   if (!snapshot) return;
+  const memoryView = source === 'memory';
+  $('memory-panel').hidden = !memoryView;
+  $('notice').hidden = memoryView || !$('notice').textContent;
+  $('storage-note').textContent = memoryView ? 'Память хранится вместе с проектом' : 'Очередь сохраняется автоматически';
+  $('task-stats').hidden = memoryView;
+  document.querySelector('.tasks-section').hidden = memoryView;
+  $('worker-note').hidden = memoryView;
   $('project-name').textContent = snapshot.project;
   const platform = { win32: 'Windows', linux: 'Linux', darwin: 'macOS' }[snapshot.worker.platform] || snapshot.worker.platform;
   $('worker-note').textContent = `Исполнитель этой очереди: ${platform}.${snapshot.worker.desktop ? ' Доступ к рабочему столу заявлен при запуске.' : ' Задачи для рабочего стола ожидают отдельного разрешения на Windows.'}`;
@@ -70,9 +117,9 @@ function render() {
   }
   $('queue-count').textContent = snapshot.tasks.length;
   $('plan-count').textContent = snapshot.plan.tasks.length;
-  $('composer').hidden = source === 'plan';
-  $('page-title').textContent = source === 'plan' ? 'План в движении.' : 'От задачи к результату.';
-  $('page-description').textContent = source === 'plan' ? 'Этапы текущего плана, их результаты и причины остановки.' : 'Опишите, что нужно сделать. Прогресс и проверки будут здесь.';
+  $('composer').hidden = source !== 'queue';
+  $('page-title').textContent = memoryView ? 'Опыт остаётся с проектом.' : source === 'plan' ? 'План в движении.' : 'От задачи к результату.';
+  $('page-description').textContent = memoryView ? 'Ваши предпочтения, проверенные приёмы и результаты предыдущей работы.' : source === 'plan' ? 'Этапы текущего плана, их результаты и причины остановки.' : 'Опишите, что нужно сделать. Прогресс и проверки будут здесь.';
   $('tasks-title').textContent = source === 'plan' ? 'Этапы плана' : 'Очередь';
   const tasks = selectedTasks();
   const attention = task => ['failed', 'blocked', 'interrupted'].includes(task.status);
@@ -87,7 +134,8 @@ function render() {
   $('recover').hidden = source === 'plan' || snapshot.ownedRun || !(hasRunning || snapshot.controllerError || ['running', 'stopping'].includes(snapshot.batch?.status));
   const batch = source === 'queue' ? snapshot.batch : null;
   $('execution-note').hidden = snapshot.executionEnabled || source !== 'queue';
-  $('batch-panel').hidden = !batch && source !== 'plan';
+  $('batch-panel').hidden = memoryView || (!batch && source !== 'plan');
+  if (memoryView) { renderMemory(); return; }
   if (source === 'plan') {
     $('batch-label').textContent = labels[snapshot.plan.status] || snapshot.plan.status;
     $('batch-detail').textContent = snapshot.plan.reason || 'Здесь появятся этапы запущенного рабочего плана.';
@@ -167,6 +215,10 @@ async function refresh() {
   refreshing = true;
   try {
     snapshot = await api('/api/state');
+    if (source === 'memory') {
+      try { memorySnapshot = await api('/api/memory'); memoryError = null; }
+      catch (error) { memorySnapshot = null; memoryError = error.message; }
+    }
     $('connection-dot').className = 'online'; $('connection-label').textContent = 'Очередь на связи';
     $('updated').textContent = `Обновлено ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
     render();
@@ -199,7 +251,7 @@ function updateSelection() {
   for (const button of document.querySelectorAll('[data-filter]')) button.classList.toggle('active', button.dataset.filter === filter);
   listKey = ''; render();
 }
-for (const button of document.querySelectorAll('[data-source]')) button.addEventListener('click', () => { source = button.dataset.source; filter = 'all'; $('details').close(); updateSelection(); });
+for (const button of document.querySelectorAll('[data-source]')) button.addEventListener('click', () => { source = button.dataset.source; filter = 'all'; $('details').close(); updateSelection(); if (source === 'memory') refresh(); });
 for (const button of document.querySelectorAll('[data-filter]')) button.addEventListener('click', () => { filter = button.dataset.filter; updateSelection(); });
 async function action(url, message) {
   try { await api(url, { method: 'POST', data: {} }); notice(message); await refresh(); }

@@ -12,11 +12,13 @@ import { createAgentServer } from './web/server.mjs';
 import { runProcess } from './process.mjs';
 import { createWorkerProfile, evaluateTaskRoute } from './routing.mjs';
 import { parseTaskOptions } from './task-options.mjs';
+import { readProjectMemory, summarizeOutcomes } from './memory.mjs';
 
 const HELP = `Sk/Ai Agent — ограниченный исполнитель (MVP)
 
 Из корня репозитория:
   node src/cli.mjs doctor
+  node src/cli.mjs memory
   node src/cli.mjs local
   node src/cli.mjs ui [--port 8741] [--open] [--paused] [--desktop]
   node src/cli.mjs work [план.md] [--minutes N] [--max-tasks N] [--retry-blocked] [--desktop]
@@ -40,6 +42,12 @@ run/resume остаются отдельными командами.
 Ctrl+C останавливает worker и дочерние процессы. Cloud-сессия имеет собственные лимиты.`;
 
 async function main([command, ...args]) {
+  if (command === 'memory') {
+    if (args.length) throw new Error('memory не принимает аргументы и не изменяет файлы.');
+    const [memory, queue, plan] = await Promise.all([readProjectMemory(ROOT), readTasks(), readTasks(WORK_DB)]);
+    console.log(JSON.stringify({ ...memory, outcomes: { queue: summarizeOutcomes(queue.tasks), plan: summarizeOutcomes(plan.tasks) } }, null, 2));
+    return;
+  }
   if (command === 'ui') {
     let port = 8741;
     let open = false;

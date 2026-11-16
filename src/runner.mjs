@@ -8,6 +8,7 @@ import { runProcess } from './process.mjs';
 import { safeStatus } from './privacy.mjs';
 import { findCodex } from './doctor.mjs';
 import { createWorkerProfile, evaluateTaskRoute } from './routing.mjs';
+import { memoryForTask, readProjectMemory } from './memory.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 export const MAX_ATTEMPTS = 3;
@@ -42,6 +43,7 @@ export async function executeTask(id, isResume = false, {
 } = {}) {
   worker = createWorkerProfile(worker);
   if (!UUID.test(id || '')) throw new Error('Ожидается UUID задачи из команды list.');
+  const memory = memoryForTask(await readProjectMemory(root), worker.platform);
   const runToken = randomUUID();
   let route;
   const task = await updateTask(id, current => !route.eligible ? {
@@ -50,6 +52,7 @@ export async function executeTask(id, isResume = false, {
     status: 'running', attempts: current.attempts + 1, startedAt: new Date().toISOString(),
     finishedAt: null, lastExitCode: null, error: null, report: null,
     workerPid: process.pid, workerHost: os.hostname(), childPid: null, runToken, waitingReason: null,
+    memory: memory?.checkpoint ?? null,
   }), dbFile, (current, db) => {
     if (current.status === 'running') throw new Error('Задача уже выполняется. Для остановленного worker используйте recover.');
     if (current.attempts >= MAX_ATTEMPTS) throw new Error(`Достигнут лимит ${MAX_ATTEMPTS} попыток. Создайте отдельную задачу.`);
@@ -112,11 +115,12 @@ export async function executeTask(id, isResume = false, {
   try {
     await mkdir(runDir, { recursive: true, mode: 0o700 });
     await checkpoint({ outputFile: path.relative(root, outputFile) });
+    if (memory) await event({ type: 'project-memory', ...memory.checkpoint });
     command ??= await findCodex();
     if (!command || /\.(cmd|bat)$/i.test(command)) throw new Error('Native Codex CLI не найден. Проверьте doctor или задайте SKAI_CODEX_EXE; shell-launcher не запускается автоматически.');
     const prompt = `Выполни задачу в корне этого репозитория. Не устанавливай системное ПО, не публикуй данные, не используй секреты и не выходи за пределы репозитория. Выполни необходимые проверки. При блокировке верни status=blocked с причиной. Финал — JSON по переданной схеме. Не включай секреты в отчёт.\nИсполнитель: ${worker.platform}; Windows GUI заявлен оператором: ${worker.desktop ? 'да' : 'нет'}. Требование задачи: ${task.target ?? 'current'}. Наличие флага GUI не доказывает доступность инструментов: если их нет, верни blocked.\n${isResume ? 'Продолжай с сохранённого состояния, не повторяй уже выполненную работу.\n' : ''}Задача:\n${task.goal}\n`;
     const result = await runProcess(command, [...prefixArgs, ...codexArgs(root, outputFile, isResume ? sessionId : null)], {
-      cwd: root, input: prompt, timeoutMs, graceMs, handleSignals, signal,
+      cwd: root, input: `${memory?.context ?? ''}${prompt}`, timeoutMs, graceMs, handleSignals, signal,
       onStdout: consume, onSpawn: pid => checkpoint({ childPid: pid }),
     });
     if (carry.trim() && !dropping) await parseLine(carry);
