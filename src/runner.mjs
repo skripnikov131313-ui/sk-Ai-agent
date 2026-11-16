@@ -10,6 +10,7 @@ import { findCodex } from './doctor.mjs';
 import { createWorkerProfile, evaluateTaskRoute } from './routing.mjs';
 import { memoryForTask, readProjectMemory } from './memory.mjs';
 import { preparePortableWorkspace } from './portable.mjs';
+import { assertProjectContext, bindProjectStore } from './projects.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 export const MAX_ATTEMPTS = 3;
@@ -23,12 +24,14 @@ export function codexArgs(root, outputFile, sessionId) {
   return args;
 }
 
-export async function recoverTask(id, dbFile = TASKS_FILE) {
+export async function recoverTask(id, dbFile = TASKS_FILE, project = null) {
+  if (project) await assertProjectContext(project, { dbFile, workspace: false });
   return updateTask(id, {
     status: 'interrupted', finishedAt: new Date().toISOString(),
     error: 'Предыдущий worker остановлен. Возобновление только по явной команде.',
     workerPid: null, childPid: null,
-  }, dbFile, task => {
+  }, dbFile, (task, db) => {
+    bindProjectStore(db, project);
     if (task.status !== 'running') throw new Error('Восстановление требуется только для running задачи.');
     if (task.workerHost !== os.hostname() || !task.workerPid || !task.childPid ||
         isAlive(task.workerPid) || isAlive(task.childPid)) {
@@ -41,11 +44,13 @@ export async function executeTask(id, isResume = false, {
   root = ROOT, dataDir = DATA_DIR, dbFile = TASKS_FILE,
   command, prefixArgs = [], timeoutMs = 600_000, graceMs = 500, handleSignals = false, signal,
   desktop = false, worker = createWorkerProfile({ desktop }),
+  project = null,
 } = {}) {
   worker = createWorkerProfile(worker);
   if (!UUID.test(id || '')) throw new Error('Ожидается UUID задачи из команды list.');
+  if (project) await assertProjectContext(project, { root, dataDir, dbFile, signal });
   const memory = memoryForTask(await readProjectMemory(root), worker.platform);
-  await preparePortableWorkspace(root, { signal });
+  if (!project) await preparePortableWorkspace(root, { signal });
   const runToken = randomUUID();
   let route;
   const task = await updateTask(id, current => !route.eligible ? {
@@ -56,6 +61,7 @@ export async function executeTask(id, isResume = false, {
     workerPid: process.pid, workerHost: os.hostname(), childPid: null, runToken, waitingReason: null,
     memory: memory?.checkpoint ?? null,
   }), dbFile, (current, db) => {
+    bindProjectStore(db, project);
     if (current.status === 'running') throw new Error('Задача уже выполняется. Для остановленного worker используйте recover.');
     if (current.attempts >= MAX_ATTEMPTS) throw new Error(`Достигнут лимит ${MAX_ATTEMPTS} попыток. Создайте отдельную задачу.`);
     if (isResume) {
@@ -70,7 +76,8 @@ export async function executeTask(id, isResume = false, {
   const runDir = path.join(dataDir, 'runs', id, `attempt-${task.attempts}-${runToken}`);
   const eventFile = path.join(runDir, 'events.jsonl');
   const outputFile = path.join(runDir, 'last-message.json');
-  const checkpoint = patch => updateTask(id, patch, dbFile, current => {
+  const checkpoint = patch => updateTask(id, patch, dbFile, (current, db) => {
+    bindProjectStore(db, project, { bind: false });
     if (current.runToken !== runToken || current.status !== 'running') throw new Error('Изменился владелец задачи.');
   });
   let eventCount = 0;

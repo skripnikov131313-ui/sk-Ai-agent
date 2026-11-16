@@ -16,13 +16,13 @@ export function isAlive(pid) {
   catch (error) { return error.code !== 'ESRCH'; }
 }
 
-export async function transaction(file, change) {
+export async function transaction(file, change, read = readTasks) {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const lockFile = `${file}.lock`;
   const lock = await acquireStoreLock(lockFile);
   try {
     await lock.writeFile(JSON.stringify({ pid: process.pid, host: os.hostname() }));
-    const db = await readTasks(file);
+    const db = await read(file);
     const result = change(db);
     await writeTasks(db, file);
     return result;

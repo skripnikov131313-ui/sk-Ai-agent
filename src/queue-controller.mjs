@@ -7,6 +7,7 @@ import { DATA_DIR, ROOT, TASKS_FILE, isAlive, readTasks, recoverStore, transacti
 import { executeTask, MAX_ATTEMPTS, recoverTask } from './runner.mjs';
 import { safeStatus } from './privacy.mjs';
 import { createWorkerProfile, evaluateTaskRoute, reconcileWaitingTasks } from './routing.mjs';
+import { assertProjectContext, bindProjectStore } from './projects.mjs';
 
 export class QueueError extends Error {
   constructor(message, status = 409) { super(message); this.status = status; }
@@ -14,7 +15,7 @@ export class QueueError extends Error {
 
 export function createQueueController({ root = ROOT, dataDir = DATA_DIR, dbFile = TASKS_FILE,
   command, prefixArgs = [], timeoutMs = 600_000, graceMs = 500,
-  desktop = false, worker = createWorkerProfile({ desktop }) } = {}) {
+  desktop = false, worker = createWorkerProfile({ desktop }), project = null } = {}) {
   worker = createWorkerProfile(worker);
   let busy = false;
   let current = null;
@@ -29,11 +30,13 @@ export function createQueueController({ root = ROOT, dataDir = DATA_DIR, dbFile 
     let lock;
     let transferred = false;
     try {
+      if (project) await assertProjectContext(project, { root, dataDir, dbFile, signal: cancellation.signal });
       await mkdir(path.dirname(dbFile), { recursive: true, mode: 0o700 });
       try { lock = await acquireStoreLock(lockFile, { maxAttempts: 1 }); }
       catch { throw new QueueError('Очередь занята другим исполнителем или требует восстановления после сбоя.'); }
       await lock.writeFile(JSON.stringify({ pid: process.pid, host: os.hostname() }));
       const batch = await transaction(dbFile, db => {
+        bindProjectStore(db, project);
         if (db.tasks.some(task => task.status === 'running')) throw new QueueError('Есть выполняющаяся задача. Подтвердите её остановку перед восстановлением.');
         reconcileWaitingTasks(db, worker);
         let tasks;
@@ -56,6 +59,7 @@ export function createQueueController({ root = ROOT, dataDir = DATA_DIR, dbFile 
       lastError = null;
       const controller = cancellation;
       const checkpoint = patch => transaction(dbFile, db => {
+        bindProjectStore(db, project, { bind: false });
         if (db.batch?.id !== batch.id) throw new QueueError('Изменился владелец запуска очереди.');
         Object.assign(db.batch, patch);
       });
@@ -70,6 +74,7 @@ export function createQueueController({ root = ROOT, dataDir = DATA_DIR, dbFile 
           while (pending.size) {
             if (controller.signal.aborted) return await finish('interrupted', 'Очередь остановлена пользователем.');
             const next = await transaction(dbFile, db => {
+              bindProjectStore(db, project, { bind: false });
               reconcileWaitingTasks(db, worker);
               return db.tasks.find(task => pending.has(task.id) &&
                 (task.id === resumeId || ['queued', 'waiting'].includes(task.status)) &&
@@ -83,7 +88,7 @@ export function createQueueController({ root = ROOT, dataDir = DATA_DIR, dbFile 
               if (controller.signal.aborted) return await finish('interrupted', 'Очередь остановлена пользователем.');
               await checkpoint({ activeTaskId: id });
               const result = await executeTask(id, resume, { root, dataDir, dbFile, command, prefixArgs,
-                timeoutMs, graceMs, signal: controller.signal, worker });
+                timeoutMs, graceMs, signal: controller.signal, worker, project });
               const task = result.task;
               if (task.status === 'completed') {
                 completed++;
@@ -100,11 +105,16 @@ export function createQueueController({ root = ROOT, dataDir = DATA_DIR, dbFile 
             }
           }
           const deferred = await transaction(dbFile, db => {
+            bindProjectStore(db, project, { bind: false });
             reconcileWaitingTasks(db, worker);
             return db.tasks.filter(task => batch.taskIds.includes(task.id) && task.status !== 'completed').length;
           });
           await finish(deferred ? 'waiting' : 'completed', deferred ? 'Часть задач ожидает подходящие условия.' : null, deferred);
         } catch (error) {
+          if (controller.signal.aborted) {
+            try { await finish('interrupted', 'Очередь остановлена пользователем.'); } catch { /* Preserve state if storage is unavailable. */ }
+            return;
+          }
           lastError = safeStatus(error.message);
           try { await finish('failed', lastError); } catch { /* Preserve a damaged database for recovery. */ }
         } finally {
@@ -130,10 +140,14 @@ export function createQueueController({ root = ROOT, dataDir = DATA_DIR, dbFile 
     if (busy || current) throw new QueueError('Сначала остановите текущий запуск.');
     busy = true;
     try {
+      if (project) await assertProjectContext(project, { dbFile, workspace: false });
       await recoverStore(dbFile);
-      for (const task of (await readTasks(dbFile)).tasks) if (task.status === 'running') await recoverTask(task.id, dbFile);
+      const stored = await readTasks(dbFile);
+      bindProjectStore(stored, project, { bind: false });
+      for (const task of stored.tasks) if (task.status === 'running') await recoverTask(task.id, dbFile, project);
       await recoverStore(`${dbFile}.batch`);
       await transaction(dbFile, db => {
+        bindProjectStore(db, project, { bind: false });
         if (!['running', 'stopping'].includes(db.batch?.status)) return;
         if (db.batch.workerHost !== os.hostname() || !Number.isSafeInteger(db.batch.workerPid) ||
             db.batch.workerPid <= 0 || isAlive(db.batch.workerPid)) throw new QueueError('Остановка прежнего исполнителя не подтверждена.');

@@ -12,6 +12,7 @@
   <div class="shell">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Sk/Ai Agent — главная"><span class="mark">/Ai</span><span>Sk/Ai <b>Agent</b></span></a>
+      <label class="project-label" for="project-select">Рабочий проект</label><select id="project-select" class="project-select" disabled><option value="">Подключение…</option></select>
       <p class="nav-caption">РАБОЧЕЕ ПРОСТРАНСТВО</p>
       <nav aria-label="Разделы">
         <button class="nav-item active" data-source="queue"><span class="nav-icon">▤</span> Мои задачи <span id="queue-count" class="nav-count">0</span></button>
@@ -41,6 +42,8 @@
         </form>
 
         <div id="notice" role="status" aria-live="polite" hidden></div>
+        <p id="workspace-note" class="error-box" role="alert" hidden></p>
+        <div id="project-busy" class="project-busy" hidden><span id="project-busy-label"></span><button id="show-active-project" class="quiet" type="button">Открыть активный проект</button></div>
         <p id="execution-note" class="paused-note" hidden>Выполнение отложено. Задачи можно сохранять и просматривать; запуск исполнителя для этой панели приостановлен.</p>
         <p id="worker-note" class="worker-note"></p>
         <section id="batch-panel" class="batch-panel" hidden><div><span id="batch-label"></span><small id="batch-detail"></small></div><progress id="batch-progress" max="1" value="0" aria-label="Прогресс запуска"></progress></section>

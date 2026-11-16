@@ -65,8 +65,38 @@ a {
   font-size:17px;
   font-weight:650;
   letter-spacing:-.7px;
-  padding:0 9px 47px
+  padding:0 9px 27px
 }
+.project-label {
+  color:var(--muted);
+  font-size:10px;
+  margin:0 8px 8px
+}
+.project-select {
+  width:100%;
+  min-width:0;
+  background:#20272f;
+  color:#e1e9e4;
+  border:1px solid #3b4943;
+  border-radius:8px;
+  padding:11px 9px;
+  margin-bottom:29px;
+  font-size:12px;
+  text-overflow:ellipsis
+}
+.project-busy {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  border:1px solid #43516a;
+  background:#222d3d;
+  padding:12px 15px;
+  margin-bottom:15px;
+  border-radius:10px;
+  font-size:12px
+}
+.project-busy span { min-width:0; overflow-wrap:anywhere }
 .brand b {
   display:block;
   font-size:12px;
@@ -803,6 +833,18 @@ dialog::backdrop {
     display:inline;
     margin-left:8px;
     font-size:10px
+  }
+  .project-label {
+    display:block;
+    margin-left:0
+  }
+  .project-select {
+    margin-bottom:12px;
+    font-size:13px
+  }
+  .project-busy {
+    align-items:flex-start;
+    flex-direction:column
   }
   .mark {
     font-size:25px

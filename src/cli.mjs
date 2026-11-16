@@ -13,12 +13,15 @@ import { runProcess } from './process.mjs';
 import { createWorkerProfile, evaluateTaskRoute } from './routing.mjs';
 import { parseTaskOptions } from './task-options.mjs';
 import { readProjectMemory, summarizeOutcomes } from './memory.mjs';
+import { loadProjectCatalog, registerProject } from './projects.mjs';
 
 const HELP = `Sk/Ai Agent — ограниченный исполнитель (MVP)
 
 Из корня репозитория:
   node src/cli.mjs doctor
   node src/cli.mjs memory
+  node src/cli.mjs projects list
+  node src/cli.mjs projects add <id> <папка Git проекта> [--name <название>]
   node src/cli.mjs local
   node src/cli.mjs ui [--port 8741] [--open] [--paused] [--desktop]
   node src/cli.mjs work [план.md] [--minutes N] [--max-tasks N] [--retry-blocked] [--desktop]
@@ -42,6 +45,18 @@ run/resume остаются отдельными командами.
 Ctrl+C останавливает worker и дочерние процессы. Cloud-сессия имеет собственные лимиты.`;
 
 async function main([command, ...args]) {
+  if (command === 'projects') {
+    const [action, id, root, ...extra] = args;
+    if (action === 'list' && args.length === 1) {
+      const projects = await loadProjectCatalog();
+      console.log(JSON.stringify(projects.map(item => ({ id: item.id, name: item.name, root: item.root, repository: item.repository })), null, 2));
+      return;
+    }
+    if (action !== 'add' || !id || !root || (extra.length && !(extra.length === 2 && extra[0] === '--name'))) throw new Error('projects: list либо add <id> <папка> [--name <название>].');
+    const saved = await registerProject({ id, root, name: extra[1] ?? path.basename(path.resolve(root)) });
+    console.log(`Проект ${saved.id} зарегистрирован. Перезапустите панель, чтобы обновить список проектов.`);
+    return;
+  }
   if (command === 'memory') {
     if (args.length) throw new Error('memory не принимает аргументы и не изменяет файлы.');
     const [memory, queue, plan] = await Promise.all([readProjectMemory(ROOT), readTasks(), readTasks(WORK_DB)]);

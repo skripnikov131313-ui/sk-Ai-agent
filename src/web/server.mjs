@@ -6,6 +6,7 @@ import { createQueueController, QueueError } from '../queue-controller.mjs';
 import { safeStatus } from '../privacy.mjs';
 import { createWorkerProfile, evaluateTaskRoute, reconcileWaitingTasks, taskRequirements, validateDependencies } from '../routing.mjs';
 import { MemoryError, readProjectMemory, summarizeOutcomes } from '../memory.mjs';
+import { PROJECT_ID, ProjectError, assertProjectContext, bindProjectStore, loadProjectCatalog } from '../projects.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']]]);
@@ -63,9 +64,32 @@ export async function createAgentServer({ root = ROOT, dataDir = path.join(root,
   timeoutMs = 600_000, graceMs = 500, desktop = false, worker = createWorkerProfile({ desktop }) } = {}) {
   worker = createWorkerProfile(worker);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Порт должен быть целым числом от 0 до 65535.');
+  const projects = await loadProjectCatalog({ root, dataDir, dbFile, workDbFile });
+  const queues = new Map();
+  const queueFor = project => {
+    if (!queues.has(project.id)) queues.set(project.id, createQueueController({ root: project.root, dataDir: project.dataDir,
+      dbFile: project.dbFile, command, prefixArgs, timeoutMs, graceMs, worker, project: project.context }));
+    return queues.get(project.id);
+  };
+  const publicProject = project => ({ id: project.id, name: project.name, scope: project.scope, repository: project.repository });
+  const selectedProject = request => {
+    const id = request.headers['x-skai-project'] ?? 'agent';
+    if (typeof id !== 'string' || !PROJECT_ID.test(id)) throw new ProjectError('Некорректный ID проекта.', 400);
+    const project = projects.find(item => item.id === id);
+    if (!project) throw new ProjectError('Проект не зарегистрирован.', 404);
+    const scope = request.headers['x-skai-project-scope'];
+    if ((scope !== undefined && scope !== project.scope) || (request.method === 'POST' && id !== 'agent' && scope !== project.scope)) {
+      throw new ProjectError('Привязка проекта не подтверждена. Обновите список проектов.');
+    }
+    return project;
+  };
+  const checkStore = (db, project) => bindProjectStore(db, project.context, { bind: false });
+  const requireFreeQueue = () => {
+    if ([...queues.values()].some(queue => queue.active)) throw new QueueError('Уже выполняется очередь проекта. Дождитесь завершения или остановите её.');
+  };
   const files = new Map(await Promise.all([...assets].map(async ([url, [name, type]]) =>
     [url, { content: await readFile(path.join(import.meta.dirname, 'public', name)), type }])));
-  const queue = createQueueController({ root, dataDir, dbFile, command, prefixArgs, timeoutMs, graceMs, worker });
+  const queue = queueFor(projects[0]);
   let origin;
   let closing = false;
   const server = http.createServer({ maxHeaderSize: 8192, requestTimeout: 10_000, headersTimeout: 10_000 }, async (request, response) => {
@@ -86,16 +110,34 @@ export async function createAgentServer({ root = ROOT, dataDir = path.join(root,
       if (asset && request.method === 'GET') return send(200, asset.content, asset.type);
       if (!url.pathname.startsWith('/api/') || request.headers['x-skai-client'] !== 'operator-ui') return send(403, { error: 'Разрешены запросы панели Agent.' });
       if (request.method === 'OPTIONS') return send(403, { error: 'Cross-origin запросы запрещены.' });
+      if (url.pathname === '/api/projects' && request.method === 'GET') {
+        return send(200, { defaultProjectId: 'agent', projects: projects.map(publicProject) });
+      }
+      const project = selectedProject(request);
+      if (project.context) await assertProjectContext(project.context, { workspace: false });
+      const queue = queueFor(project);
+      const { root, dataDir, dbFile, workDbFile } = project;
       if (url.pathname === '/api/memory' && request.method === 'GET') {
+        if (project.context) await assertProjectContext(project.context);
         const [memory, db, plan] = await Promise.all([readProjectMemory(root), readTasks(dbFile), readTasks(workDbFile)]);
+        checkStore(db, project); checkStore(plan, project);
         return send(200, { ...memory, outcomes: { queue: summarizeOutcomes(db.tasks), plan: summarizeOutcomes(plan.tasks) } });
       }
       if (url.pathname === '/api/state' && request.method === 'GET') {
         const [db, work] = await Promise.all([readTasks(dbFile), readTasks(workDbFile)]);
+        checkStore(db, project); checkStore(work, project);
+        let workspaceError = null;
+        if (project.context) {
+          try { await assertProjectContext(project.context); }
+          catch (error) { if (!(error instanceof ProjectError)) throw error; workspaceError = error.message; }
+        }
+        const busy = projects.find(item => item.id !== project.id && queues.get(item.id)?.active);
         const currentIds = work.controller?.taskIds ?? [];
         const batch = db.batch;
         const tasks = db.tasks.map(task => view(task, false, db.tasks, worker));
-        return send(200, { project: path.basename(root), executionEnabled, ownedRun: queue.active, worker,
+        return send(200, { project: project.name, projectId: project.id, projectScope: project.scope,
+          executionEnabled: executionEnabled && !workspaceError, workspaceError, otherActiveProject: busy ? publicProject(busy) : null,
+          ownedRun: queue.active, worker,
           controllerError: queue.error, tasks, runnableCount: tasks.filter(task => task.status === 'queued').length,
           batch: batch ? { status: batch.status, taskIds: batch.taskIds, completed: batch.completed,
             activeTaskId: batch.activeTaskId, startedAt: batch.startedAt, finishedAt: batch.finishedAt, waiting: batch.waiting ?? 0,
@@ -104,12 +146,14 @@ export async function createAgentServer({ root = ROOT, dataDir = path.join(root,
             tasks: work.tasks.filter(task => currentIds.includes(task.id)).map(task => view(task, false, work.tasks, worker)) } });
       }
       if (url.pathname === '/api/tasks' && request.method === 'POST') {
+        if (project.context) await assertProjectContext(project.context, { workspace: false });
         const input = await body(request, ['goal', 'requestId', 'target', 'dependsOn']);
         if (typeof input.goal !== 'string' || !UUID.test(input.requestId ?? '')) throw new QueueError('Нужны текст задачи и идентификатор отправки.', 400);
         if (safeStatus(input.goal) !== input.goal) throw new QueueError('Текст похож на пароль или ключ. Уберите секрет перед сохранением.', 400);
         let task;
         try { task = newTask(input.goal, input); } catch (error) { throw new QueueError(error.message, 400); }
         const saved = await transaction(dbFile, db => {
+          bindProjectStore(db, project.context);
           const previous = db.tasks.find(item => item.submissionId === input.requestId);
           if (previous) {
             if (previous.goal !== task.goal || JSON.stringify(taskRequirements(previous)) !== JSON.stringify(taskRequirements(task))) throw new QueueError('Этот идентификатор отправки уже использован для другой задачи или требований.');
@@ -129,6 +173,7 @@ export async function createAgentServer({ root = ROOT, dataDir = path.join(root,
           const source = url.searchParams.get('source') ?? 'queue';
           if (!['queue', 'plan'].includes(source)) throw new QueueError('Неизвестная очередь.', 400);
           const db = await readTasks(source === 'plan' ? workDbFile : dbFile);
+          checkStore(db, project);
           const task = db.tasks.find(item => item.id === match[1]);
           if (!task) throw new QueueError('Задача не найдена.', 404);
           return send(200, { task: view(task, true, db.tasks, worker) });
@@ -136,6 +181,7 @@ export async function createAgentServer({ root = ROOT, dataDir = path.join(root,
         if (request.method === 'POST' && match[2] === 'resume') {
           await body(request, []);
           if (!executionEnabled) throw new QueueError('Запуск исполнителя приостановлен для этой панели.');
+          requireFreeQueue();
           const batch = await queue.start(match[1]);
           return send(202, { batch: { status: batch.status, taskIds: batch.taskIds } });
         }
@@ -144,6 +190,7 @@ export async function createAgentServer({ root = ROOT, dataDir = path.join(root,
         await body(request, []);
         if (url.pathname.endsWith('/start')) {
           if (!executionEnabled) throw new QueueError('Запуск исполнителя приостановлен для этой панели.');
+          requireFreeQueue();
           const batch = await queue.start();
           return send(202, { batch: { status: batch.status, taskIds: batch.taskIds } });
         }
@@ -154,7 +201,7 @@ export async function createAgentServer({ root = ROOT, dataDir = path.join(root,
       return send(404, { error: 'Адрес не найден.' });
     } catch (error) {
       if (response.headersSent || response.destroyed) return;
-      const status = error instanceof QueueError ? error.status : error instanceof MemoryError ? 422 : 500;
+      const status = error instanceof QueueError || error instanceof ProjectError ? error.status : error instanceof MemoryError ? 422 : 500;
       send(status, { error: status < 500 ? safeStatus(error.message) : 'Не удалось прочитать или сохранить состояние. Существующие данные сохранены.' });
     }
   });
@@ -163,11 +210,11 @@ export async function createAgentServer({ root = ROOT, dataDir = path.join(root,
     server.listen(port, '127.0.0.1', resolve);
   });
   origin = `http://127.0.0.1:${server.address().port}`;
-  return { origin, server, queue, async close() {
+  return { origin, server, queue, projects: projects.map(publicProject), async close() {
     closing = true;
-    queue.requestStop();
+    for (const queue of queues.values()) queue.requestStop();
     const stopped = new Promise(resolve => { server.close(resolve); server.closeIdleConnections(); });
-    await queue.stop();
+    await Promise.all([...queues.values()].map(queue => queue.stop()));
     server.closeAllConnections();
     await stopped;
   } };
