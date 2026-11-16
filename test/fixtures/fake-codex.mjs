@@ -35,7 +35,7 @@ if (mode === 'descendant') {
   } else {
     if (mode === 'slow') await new Promise(resolve => setTimeout(resolve, 500));
     if (mode === 'oversized') process.stdout.write('x'.repeat(200_000) + '\n');
-    const status = mode === 'smoke-blocked' || (mode === 'ui' && prompt.includes('FIXTURE_BLOCKED')) ? 'blocked' : mode === 'credential-report' ? 'failed' : ['blocked', 'failed'].includes(mode) ? mode : 'completed';
+    const status = mode === 'smoke-blocked' || (mode === 'ui' && prompt.includes('FIXTURE_BLOCKED')) ? 'blocked' : ['credential-report', 'failed-blockers'].includes(mode) ? 'failed' : ['blocked', 'failed'].includes(mode) ? mode : 'completed';
     if (['smoke', 'smoke-wrong'].includes(mode)) {
       const file = /^SMOKE_FILE=(.+)$/m.exec(prompt)?.[1];
       const marker = /^SMOKE_MARKER=(.+)$/m.exec(prompt)?.[1];
@@ -45,7 +45,7 @@ if (mode === 'descendant') {
       await writeFile(path.join(root, 'fixture-result.txt'), 'protocol fixture changed this file\n');
     }
     await writeFile(output, JSON.stringify({ status, summary: mode === 'credential-report' ? 'api_key="SYNTHETIC_PASSWORD"' : mode === 'ui' ? 'Интеграционная проверка протокола. Модель не вызывалась.' : 'Protocol fixture result',
-      checks: ['fixture ran'], filesChanged: ['fixture-result.txt'], blockers: status === 'blocked' ? ['synthetic blocker'] : [] }));
+      checks: ['fixture ran'], filesChanged: ['fixture-result.txt'], blockers: status === 'blocked' || ['completed-blockers', 'failed-blockers'].includes(mode) ? ['synthetic blocker'] : [] }));
     process.stdout.write(JSON.stringify({ type: 'turn.completed' }));
     if (mode === 'nonzero') process.exitCode = 7;
   }

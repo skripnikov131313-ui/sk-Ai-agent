@@ -55,6 +55,9 @@ test('routing reports platform, desktop, damaged and unsuccessful dependency req
   assert.equal(evaluateTaskRoute(child, [parent, child], linux).code, 'blocked-dependency');
   parent.status = 'completed';
   assert.equal(evaluateTaskRoute(child, [parent, child], linux).eligible, true);
+  parent.report = { status: 'completed', blockers: ['historical contradiction'] };
+  assert.equal(evaluateTaskRoute(child, [parent, child], linux).code, 'blocked-dependency');
+  delete parent.report;
   assert.equal(evaluateTaskRoute(child, [child], linux).code, 'missing-dependency');
   assert.equal(evaluateTaskRoute({ ...child, dependsOn: null }, [child], linux).code, 'invalid-requirements');
   const gui = newTask('Проверить настоящее окно', { target: 'windows-gui' });
@@ -106,6 +109,10 @@ test('direct run and resume enforce unfinished dependencies and preserve a suspe
   assert.equal(stored.attempts, 1);
   assert.equal(stored.sessionId, sessionId);
   await updateTask(parent.id, { status: 'completed' }, options.dbFile);
+  await updateTask(parent.id, { report: { status: 'completed', blockers: ['historical contradiction'] } }, options.dbFile);
+  await assert.rejects(() => executeTask(child.id, true, { ...options, worker: linux }), /содержит блокеры/);
+  assert.equal((await readTasks(options.dbFile)).tasks.find(task => task.id === child.id).attempts, 1);
+  await updateTask(parent.id, { report: { status: 'completed', blockers: [] } }, options.dbFile);
   assert.equal((await executeTask(child.id, true, { ...options, worker: linux })).task.status, 'completed');
 });
 

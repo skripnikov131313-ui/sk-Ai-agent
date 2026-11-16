@@ -34,6 +34,9 @@ export function evaluateTaskRoute(task, tasks, worker = createWorkerProfile()) {
   };
   const parents = requirements.dependsOn.map(id => tasks.find(item => item.id === id));
   if (parents.some(parent => !parent)) return { eligible: false, code: 'missing-dependency', message: 'Предыдущая задача отсутствует в очереди. Требуется проверить зависимость.' };
+  if (parents.some(parent => parent.report?.blockers?.length)) return {
+    eligible: false, code: 'blocked-dependency', message: 'Отчёт предыдущей задачи содержит блокеры. Сначала устраните их и подтвердите результат.',
+  };
   if (parents.some(parent => ['failed', 'blocked', 'interrupted'].includes(parent.status))) return {
     eligible: false, code: 'blocked-dependency', message: 'Предыдущая задача не завершена: сначала устраните её ошибку или блокер.',
   };

@@ -192,6 +192,26 @@ test('a blocker stops the batch and reports the reason without starting the next
   assert.deepEqual(detail.report.blockers, ['synthetic blocker']);
 });
 
+test('a contradictory completion with blockers stops the batch and cannot unlock its dependent task', async t => {
+  const { add, api, dbFile } = await setup(t, 'completed-blockers');
+  const parent = (await add('Подготовить данные с противоречивым отчётом')).body.task;
+  const child = (await api('/api/tasks', { goal: 'Использовать результат предыдущей задачи', dependsOn: [parent.id], requestId: randomUUID() })).body.task;
+  const independent = (await add('Следующая независимая задача этого запуска')).body.task;
+  await api('/api/queue/start', {});
+  await eventually(async () => !(await api('/api/state')).body.ownedRun);
+  const db = await readTasks(dbFile);
+  assert.equal(db.batch.status, 'blocked');
+  assert.equal(db.batch.completed, 0);
+  const saved = db.tasks.find(task => task.id === parent.id);
+  assert.equal(saved.status, 'blocked');
+  assert.equal(saved.attempts, 1);
+  assert.equal(saved.report.status, 'completed');
+  for (const id of [child.id, independent.id]) assert.equal(db.tasks.find(task => task.id === id).attempts, 0);
+  const waiting = (await api(`/api/tasks/${child.id}`)).body.task;
+  assert.equal(waiting.status, 'waiting');
+  assert.equal(waiting.route.code, 'blocked-dependency');
+});
+
 test('failed structured work gets at most three saved-session attempts', async t => {
   const { add, api, dbFile } = await setup(t, 'failed');
   const task = (await add('Исправить искусственную тестовую ошибку')).body.task;

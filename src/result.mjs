@@ -22,6 +22,9 @@ export function classifyResult(exitCode, timedOut, rawMessage) {
           Array.isArray(report[key]) && report[key].every(item => typeof item === 'string'))) {
       throw new Error('invalid report shape');
     }
+    // The declared status cannot override an explicit obstacle. Keep the
+    // original report for diagnosis, but never unblock dependent work with it.
+    if (report.blockers.length) return { status: 'blocked', report, error: 'Исполнитель указал блокеры; завершение задачи не подтверждено.' };
     return { status: report.status, report, error: report.status === 'failed' ? report.summary : undefined };
   } catch {
     return { status: 'failed', report: null, error: 'Не удалось разобрать структурированный отчёт Codex.' };

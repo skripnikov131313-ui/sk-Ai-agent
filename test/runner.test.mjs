@@ -55,12 +55,20 @@ test('executor consumes a fresh structured report, sandbox args, and final parti
 for (const [mode, status, exitCode] of [
   ['blocked', 'blocked', 2], ['failed', 'failed', 1], ['bad-report', 'failed', 1],
   ['no-report', 'failed', 1], ['nonzero', 'failed', 7], ['oversized', 'completed', 0],
+  ['completed-blockers', 'blocked', 2], ['failed-blockers', 'blocked', 2],
 ]) {
   test(`executor distinguishes ${mode}`, async t => {
     const { task, options } = await setup(t);
     const result = await executeTask(task.id, false, { ...options, prefixArgs: [fixturePath, mode] });
     assert.equal(result.task.status, status);
     assert.equal(result.exitCode, exitCode);
+    if (mode.endsWith('-blockers')) {
+      assert.equal(result.task.report.status, mode === 'completed-blockers' ? 'completed' : 'failed');
+      assert.deepEqual(result.task.report.blockers, ['synthetic blocker']);
+      assert.match(result.task.error, /блокер/);
+      assert.equal(result.task.attempts, 1);
+      assert.deepEqual(JSON.parse(await readFile(result.outputFile, 'utf8')), result.task.report);
+    }
     if (mode === 'oversized') {
       const events = await readFile(path.join(path.dirname(result.outputFile), 'events.jsonl'), 'utf8');
       assert.match(events, /oversized-output/);
