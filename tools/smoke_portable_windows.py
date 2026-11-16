@@ -127,6 +127,7 @@ if __name__ == "__main__":
         print(json.dumps(result))
         if os.environ.get("GITHUB_ACTIONS") == "true":
             print(f"::notice title=Portable package SHA256::{result['archiveSha256']}")
+            print(f"::notice title=Portable content manifest SHA256::{result['fileManifestSha256']}")
     except (PackageError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         message = str(error) if isinstance(error, PackageError) else "Packaged Windows execution check failed."
         if os.environ.get("GITHUB_ACTIONS") == "true":

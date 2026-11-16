@@ -280,7 +280,8 @@ def verify_package(file, expected_commit=None, source_root=ROOT):
             raise PackageError("Package source commit does not match checkout.")
         if metadata.get("runtime") != {"version": VERSION, "url": URL, "archiveSha256": ARCHIVE_SHA, "nodeSha256": NODE_SHA, "licenseSha256": LICENSE_SHA}:
             raise PackageError("Runtime metadata does not match pinned inputs.")
-        manifest = archive.read(TOP + "/FILES.sha256").decode("utf-8").splitlines()
+        manifest_bytes = archive.read(TOP + "/FILES.sha256")
+        manifest = manifest_bytes.decode("utf-8").splitlines()
         checksums = {}
         for line in manifest:
             if not re.fullmatch(r"[a-f0-9]{64}  .+", line):
@@ -308,7 +309,8 @@ def verify_package(file, expected_commit=None, source_root=ROOT):
                 raise PackageError("Package does not contain the expected source snapshot.")
             if any(checksums[name] != digest(data) for name, data in source_files.items()):
                 raise PackageError("Package source bytes differ from the committed snapshot.")
-    return {"valid": True, "sourceCommit": metadata["sourceCommit"], "nodeVersion": VERSION, "files": len(names), "archiveSha256": sha_file(file)}
+    return {"valid": True, "sourceCommit": metadata["sourceCommit"], "nodeVersion": VERSION, "files": len(names),
+            "archiveSha256": sha_file(file), "fileManifestSha256": digest(manifest_bytes)}
 
 
 def main():
