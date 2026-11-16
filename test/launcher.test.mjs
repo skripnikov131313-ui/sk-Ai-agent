@@ -65,7 +65,7 @@ if (process.argv.includes('fail')) process.exitCode = 13;
     await writeFile(driver, lines.join('\r\n'));
     return capture(`""${driver}""`);
   };
-  return { root, env, putNode, invoke };
+  return { root, project, env, putNode, invoke };
 }
 
 function success(result) {
@@ -82,6 +82,14 @@ test('launcher runs Node from PATH and forwards quoted arguments', windows, asyn
   assert.deepEqual(result.argv, ['doctor', 'two words']);
 });
 
+test('launcher prefers a bundled runtime over PATH without changing system settings', windows, async t => {
+  const { root, project, env, putNode, invoke } = await setup(t);
+  const bundled = await putNode(path.join(project, 'runtime', 'node.exe'));
+  const other = await putNode(path.join(root, 'Other Node', 'node.exe'));
+  env.PATH = path.dirname(other) + path.delimiter + env.PATH;
+  assert.equal(success(await invoke()).executable, bundled);
+});
+
 test('launcher finds a standard Node install when it is missing from PATH', windows, async t => {
   const { env, putNode, invoke } = await setup(t);
   const node = await putNode(path.join(env.ProgramFiles, 'nodejs', 'node.exe'));
@@ -96,7 +104,8 @@ test('launcher finds a Codex MSIX runtime with an underscore before the version'
 });
 
 test('launcher honors an explicit runtime path containing spaces and ampersand', windows, async t => {
-  const { root, env, putNode, invoke } = await setup(t);
+  const { root, project, env, putNode, invoke } = await setup(t);
+  await putNode(path.join(project, 'runtime', 'node.exe'));
   const node = await putNode(path.join(root, 'Explicit Node & tools', 'node.exe'));
   env.SKAI_NODE_EXE = node;
   assert.equal(success(await invoke()).executable, node);
@@ -112,7 +121,8 @@ test('missing Node produces installation guidance without attempting installatio
 });
 
 test('invalid explicit runtime fails clearly instead of silently choosing another', windows, async t => {
-  const { root, env, invoke } = await setup(t);
+  const { root, project, env, putNode, invoke } = await setup(t);
+  await putNode(path.join(project, 'runtime', 'node.exe'));
   env.SKAI_NODE_EXE = path.join(root, 'missing node.exe');
   const result = await invoke();
   assert.equal(result.code, 1, result.stdout + result.stderr);

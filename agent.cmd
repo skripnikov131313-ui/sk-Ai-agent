@@ -5,6 +5,10 @@ set "NODE_EXE="
 rem An explicit, per-session override does not modify the system PATH.
 if defined SKAI_NODE_EXE goto explicit_node
 
+rem A portable package carries its own verified runtime beside this launcher.
+if exist "%~dp0runtime\node.exe" set "NODE_EXE=%~dp0runtime\node.exe"
+if defined NODE_EXE goto node_found
+
 rem Search the current PATH directly; do not launch another cmd via FOR /F.
 for %%N in (node.exe) do set "NODE_EXE=%%~$PATH:N"
 if defined NODE_EXE goto node_found

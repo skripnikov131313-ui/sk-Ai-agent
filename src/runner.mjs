@@ -9,6 +9,7 @@ import { safeStatus } from './privacy.mjs';
 import { findCodex } from './doctor.mjs';
 import { createWorkerProfile, evaluateTaskRoute } from './routing.mjs';
 import { memoryForTask, readProjectMemory } from './memory.mjs';
+import { preparePortableWorkspace } from './portable.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 export const MAX_ATTEMPTS = 3;
@@ -44,6 +45,7 @@ export async function executeTask(id, isResume = false, {
   worker = createWorkerProfile(worker);
   if (!UUID.test(id || '')) throw new Error('Ожидается UUID задачи из команды list.');
   const memory = memoryForTask(await readProjectMemory(root), worker.platform);
+  await preparePortableWorkspace(root, { signal });
   const runToken = randomUUID();
   let route;
   const task = await updateTask(id, current => !route.eligible ? {

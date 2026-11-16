@@ -6,11 +6,12 @@ import { spawn } from 'node:child_process';
 export async function runProcess(command, args, {
   cwd, input = '', timeoutMs = 600_000, graceMs = 500,
   onStdout, onSpawn, handleSignals = false, inheritStdio = false, signal,
+  env = process.env,
 } = {}) {
   if (signal?.aborted) return { code: 130, stdout: '', stderr: '', reason: 'signal' };
   const grouped = process.platform !== 'win32' && !inheritStdio;
   const child = spawn(command, args, {
-    cwd, windowsHide: !inheritStdio, detached: grouped,
+    cwd, env, windowsHide: !inheritStdio, detached: grouped,
     stdio: inheritStdio ? 'inherit' : ['pipe', 'pipe', 'pipe'],
   });
   let error;
