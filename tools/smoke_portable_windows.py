@@ -128,6 +128,10 @@ if __name__ == "__main__":
         if os.environ.get("GITHUB_ACTIONS") == "true":
             print(f"::notice title=Portable package SHA256::{result['archiveSha256']}")
             print(f"::notice title=Portable content manifest SHA256::{result['fileManifestSha256']}")
+            with zipfile.ZipFile(args.archive) as archive:
+                lines = archive.read(TOP + "/FILES.sha256").decode("utf-8").splitlines()
+            proof = json.dumps({"portableFileProof": {line.split("  ", 1)[1]: line.split("  ", 1)[0] for line in lines}}, sort_keys=True)
+            print(f"::notice title=Portable file fingerprints::{proof.replace('%', '%25')}")
     except (PackageError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         message = str(error) if isinstance(error, PackageError) else "Packaged Windows execution check failed."
         if os.environ.get("GITHUB_ACTIONS") == "true":

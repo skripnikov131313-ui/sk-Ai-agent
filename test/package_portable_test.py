@@ -107,6 +107,15 @@ class PortableTests(unittest.TestCase):
             portable.source_snapshot(self.source)
         self.assertEqual(file.read_text(), "// changed source\n")
 
+    def test_source_line_endings_are_canonical_for_windows_and_linux_builds(self):
+        self.command("config", "core.autocrlf", "false")
+        (self.source / "README.md").write_bytes(b"Fixture project\r\nSecond line\r\n")
+        self.command("add", "README.md")
+        self.command("-c", "user.name=Portable fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "CRLF source fixture")
+        files, _, _ = portable.source_snapshot(self.source)
+        self.assertEqual(files["README.md"], b"Fixture project\nSecond line\n")
+        self.assertEqual(files["agent.cmd"], b"@echo off\r\n")
+
     def test_wrong_runtime_archive_hash_is_rejected(self):
         self.runtime_zip.write_bytes(b"wrong download")
         with self.assertRaises(portable.PackageError):

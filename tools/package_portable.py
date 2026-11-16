@@ -136,8 +136,8 @@ def source_snapshot(root):
                 continue
             if item.name not in names or not item.isfile() or item.size > 1024 * 1024:
                 raise PackageError("Unexpected source archive entry.")
-            data = tar.extractfile(item).read()
-            files[item.name] = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n") if item.name.endswith(".cmd") else data
+            data = tar.extractfile(item).read().replace(b"\r\n", b"\n")
+            files[item.name] = data.replace(b"\n", b"\r\n") if item.name.endswith(".cmd") else data
     if set(files) != set(names):
         raise PackageError("Incomplete source archive.")
     return files, commit, timestamp
